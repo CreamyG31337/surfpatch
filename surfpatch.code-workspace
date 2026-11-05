@@ -1,0 +1,8 @@
+{
+  "folders": [
+    { "path": "." },
+    { "path": "../rxlkit" },
+    { "path": "../file-finder" }
+  ],
+  "settings": {}
+}
