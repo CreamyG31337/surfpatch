@@ -1,39 +1,24 @@
 # surfpatch
 
-Tools for checking and repairing LandXML TIN surfaces built from survey data: trace vertices back to source
-shots, find spikes, cut out and re-triangulate bad areas, insert missed shots, patch from drone/TLS point clouds,
-and compare surfaces (volumes, before/after).
+Tool repo (being built): check and repair LandXML TIN surfaces built from survey data - trace vertices back to
+source shots, find spikes, cut out and re-triangulate bad areas, insert missed shots, patch from drone/TLS point
+clouds, compare surfaces (volumes, before/after). Planned CLI: `trace`, `spikes`, `cut`, `insert`, `drone`, `diff`,
+with tests on synthetic surfaces like rxlkit's.
 
-Status: the working code is in `legacy/` (one-off scripts, gitignored, see CLAUDE.local.md). The plan is to turn
-them into a `surfpatch` package with a CLI (`trace`, `spikes`, `cut`, `insert`, `drone`, `diff`) and tests on
-synthetic surfaces, the way rxlkit is tested.
+Source material: the one-off scripts in `C:\Projects\jobs\2026-11-05 OG rock + MCB surface repair\scripts\`
+(see its NOTES.md). Generalise them; don't copy site specifics (paths, codes, surface names) into this repo.
 
-## Sibling repos (open via surfpatch.code-workspace; access granted in .claude/settings.json)
+## Reuse from sibling repos (the hub C:\Projects\CLAUDE.md lists all tools)
 
-- `../rxlkit` - RoadXML (.rxl) corridors to checked LandXML TINs. Reuse, don't copy:
-  - `rxlkit.landxml.write_surfaces(path, [Surface])`, `Surface(name, points (N,E,Z), faces 0-based, desc)`
-  - `rxlkit.tin.quality(P, F)` / `quality_ok(q)` - winding, zero area, duplicate XY, non-manifold edges
-  - `rxlkit.tin.elevations_at`, `rxlkit.tin.distance`
-  - Its `read_surfaces` uses ElementTree and needs `<Pnts>/<Faces>`: fine for normal files, not for 100+ MB
-    files or TBC "source data only" exports (breaklines + DataPoints, no faces) - surfpatch needs a streaming reader.
-  - Read `../rxlkit/README.md` before changing anything there; it has its own tests (`python -m unittest discover -s tests`).
-- `../file-finder` - `survey_index.py`: indexes survey files (LandXML, LAZ, JXL scans, CSV, GeoTIFF, TBC) into an
-  HTML report plus `<report>.footprints.json` (5 m cells `[ix, iy, count]` per CSV/surface; bbox per LAZ/ortho;
-  station + frame polygon per JXL scan). Its CSV helpers (`_guess_enz`, `_numcount`, header-name sets) are what
-  `legacy/trace.py` uses to read arbitrary survey CSVs. Read `../file-finder/README.md` for the details.
-  file-finder has a graphify knowledge graph (`../file-finder/graphify-out/`); use `graphify query` there.
-
-When a change belongs in a sibling (e.g. a generic TIN check -> rxlkit, a footprint field -> file-finder), make it
-there, run that repo's tests, and say which repo was changed.
+- `../rxlkit`: `rxlkit.landxml.write_surfaces`, `Surface`, `rxlkit.tin.quality` / `quality_ok`, `elevations_at`.
+  Its `read_surfaces` needs `<Pnts>/<Faces>` and loads the whole file - surfpatch needs a streaming reader for
+  100+ MB files and TBC source-data-only exports (2-point breaklines, no faces).
+- `../file-finder`: footprints JSON format and CSV column guessing (`survey_index._guess_enz`, header-name sets).
 
 ## Conventions
 
-- Keep company/project/site specifics (paths, feature codes, surface names, thresholds tuned to one site) out of
-  code and committed docs; they go in config or CLAUDE.local.md. Code defaults stay generic.
-- Scripts are uv PEP 723 single files (`uv run --script x.py`). Write them with the Write tool: a UTF-8 BOM from
-  PowerShell `Set-Content -Encoding utf8` breaks the `# /// script` header.
-- Run Python that reads downloaded/untrusted files with `-I`.
-- Never open OneDrive online-only files by accident (reading even a LAZ header downloads the whole file):
-  check `os.stat(p).st_file_attributes & (0x400000 | 0x40000 | 0x1000)` first.
+- Code defaults generic; project specifics in config.
+- uv PEP 723 for one-off scripts; write files with the Write tool (a BOM breaks the `# /// script` header).
+- Check OneDrive online-only (`st_file_attributes & (0x400000 | 0x40000 | 0x1000)`) before opening big files.
 - Every TIN written must pass `rxlkit.tin.quality_ok`, plus an area check when a hole is re-triangulated.
-- LandXML `<P>` is `N E Z`; internal arrays in surfpatch are (E, N, Z) unless named otherwise - convert at the edges.
+- LandXML `<P>` is `N E Z`; internal arrays are (E, N, Z) unless named otherwise.

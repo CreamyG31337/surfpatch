@@ -11,11 +11,6 @@ Check and repair LandXML TIN surfaces built from survey data:
 Work in progress: the tools are being turned into a package with a command-line interface. It builds on
 [rxlkit](../rxlkit) for LandXML writing and TIN checks.
 
-## Working on it
-
-Open `surfpatch.code-workspace` in VS Code to get this repo plus the two it works with,
-`../rxlkit` and `../file-finder`, in one window.
-
 ## License
 
 MIT.
