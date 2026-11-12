@@ -108,6 +108,27 @@ def test_dxf_mesh_roundtrip(tmp_path):
     assert pf.is_poly_face_mesh and pf.dxf.layer == "A_B_C" and len(list(pf.faces())) == len(F)
 
 
+def test_read_polygons_minimal_lwpolyline(tmp_path):
+    # LWPOLYLINE without AcDb subclass markers (as older scripts wrote): ezdxf rejects it, fallback reads it
+    tags = ["0", "SECTION", "2", "ENTITIES", "0", "LWPOLYLINE", "8", "B", "90", "4", "70", "1"]
+    for x, y in [(E0, N0), (E0 + 2, N0), (E0 + 2, N0 + 3), (E0, N0 + 3)]:
+        tags += ["10", f"{x:.3f}", "20", f"{y:.3f}"]
+    (tmp_path / "b.dxf").write_text("\n".join(tags + ["0", "ENDSEC", "0", "EOF"]) + "\n")
+    (pg,) = io.read_polygons(tmp_path / "b.dxf")
+    assert io.polygon_area(pg) == pytest.approx(6.0)
+
+
+def test_rebuild_source_snaps_to_written_precision(tmp_path):
+    # two points 0.04 mm apart straddling a 1 mm rounding boundary must become one vertex
+    pts = [(N0, E0, 1), (N0, E0 + 10, 1), (N0 + 10, E0, 1), (N0 + 5, E0 + 5.00049, 1), (N0 + 5, E0 + 5.00053, 1)]
+    dp = " ".join(f"{n} {e} {z}" for n, e, z in pts)
+    (tmp_path / "s.xml").write_text(
+        '<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2"><Surfaces><Surface name="S"><SourceData>'
+        f"<DataPoints><PntList3D>{dp}</PntList3D></DataPoints></SourceData></Surface></Surfaces></LandXML>")
+    s = io.read_source_only(tmp_path / "s.xml")
+    assert len(s.points) == 4 and quality(s.points, s.faces)["duplicate_xy"] == 0
+
+
 def test_read_shots_header_and_plain(tmp_path):
     (tmp_path / "h.csv").write_text("Point,Easting,Northing,Elevation,Code\n1,10,20,30,TOR\n")
     (tmp_path / "p.csv").write_text("1,20,10,30,TOR\n2,21,11,31,OG\n")

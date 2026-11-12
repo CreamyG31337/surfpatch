@@ -7,6 +7,7 @@
   cut      XML OUT (--csv F... | --boundary DXF)   remove vertices, re-triangulate only the hole
   insert   XML OUT --csv F...              add shots, re-triangulate only around them
   diff     NEW OLD [--boundary DXF]        volume NEW - OLD
+  drone    XML OUT_DIR --laz F...          patch where 2 drone flights agree the ground is lower
   todxf    XML...                          LandXML TIN -> DXF polyface mesh
   rebuild-source XML OUT                   TBC source-data-only export -> TIN
 
@@ -182,6 +183,52 @@ def cmd_diff(a):
           f"max raise {r.max_raise:+.3f} m, max drop {r.max_drop:+.3f} m")
 
 
+def cmd_drone(a):
+    from . import drone
+    s = _surface(a)
+    P = s.points
+    bbox = (P[:, 1].min(), P[:, 0].min(), P[:, 1].max(), P[:, 0].max())
+    flights, names = [], []
+    for path in _csvs(a.laz):
+        c = io.clip_las(path, bbox, allow_download=a.download)
+        if c is None:
+            print(f"  skipped {os.path.basename(path)} (online-only, or no points over the surface)")
+            continue
+        flights.append(c[:3])
+        names.append(os.path.basename(path))
+        print(f"  {os.path.basename(path)}: {len(c[0]):,} points over the surface")
+    check = None
+    if a.check:
+        c = io.clip_las(a.check, bbox, allow_download=a.download)
+        check = None if c is None else c[:3]
+        print(f"  check cloud {os.path.basename(a.check)}: " + ("skipped" if c is None else f"{len(c[0]):,} points"))
+    mask = io.read_boundary(a.boundary) if a.boundary else None
+    r = drone.drone_patch(P, s.faces, flights, a.step, a.confirm, a.min_drop, a.min_area, mask_polygon=mask,
+                          check=check, check_tol=a.check_tol)
+    st = r.stats
+    print(f"surface {st['surface_area']:,.0f} m2; patch {st['patch_area']:,.0f} m2 "
+          f"({st['interpolated_area']:,.0f} m2 interpolated across walls / no data)")
+    if not len(r.faces):
+        print("no area where confirmed drone ground is below the surface; nothing written")
+        return
+    print(f"patch minus surface: median {st['median_dz']:+.2f} m, volume {st['volume']:+,.1f} m3")
+    if "check_area" in st:
+        print(f"patch vs check cloud on {st['check_area']:,.0f} m2: median {st['check_median']:+.3f} m")
+    print("flight used: " + ", ".join(f"{names[k]} {v:,.0f} m2" for k, v in sorted(st["flight_area"].items())))
+    os.makedirs(a.out_dir, exist_ok=True)
+    name = a.name or f"{s.name} DRONE PATCH"
+    base = os.path.join(a.out_dir, name)
+    q = quality(r.points, r.faces)
+    write_surfaces(base + ".xml", [Surface(name, r.points, r.faces,
+                                           f"confirmed-lowest drone ground ({len(flights)} flights, {a.step} m cells, "
+                                           f"2 flights within {a.confirm} m) below '{s.name}'")],
+                   application="surfpatch")
+    io.write_pnezd(base + ".csv", r.points, "DRONE-LOW")
+    io.write_dxf_polylines(base + " BNDY.dxf", drone.region_outline(r.grid, r.region), "DRONE_PATCH_BNDY")
+    print(f"wrote {base}.xml ({len(r.points)} pts, {len(r.faces)} faces, TIN checks "
+          f"{'OK' if quality_ok(q) else 'FAILED'}), .csv and BNDY.dxf")
+
+
 def cmd_todxf(a):
     for path in a.xml:
         surfs = read_surfaces(path)
@@ -233,6 +280,17 @@ def main(argv=None):
     sp = sub.add_parser("diff"); sp.set_defaults(fn=cmd_diff); sp.add_argument("new"); sp.add_argument("old")
     sp.add_argument("--surface"); sp.add_argument("--surface-old"); sp.add_argument("--boundary")
     sp.add_argument("--step", type=float, default=0.25)
+    sp = p("drone", cmd_drone); sp.add_argument("out_dir")
+    sp.add_argument("--laz", nargs="+", required=True, help="drone flights (LAS/LAZ, wildcards ok), 2 or more")
+    sp.add_argument("--boundary", help="DXF: patch only inside this polygon")
+    sp.add_argument("--check", help="independent cloud (e.g. TLS LAZ) to reject cells the drone gets wrong")
+    sp.add_argument("--check-tol", type=float, default=0.25)
+    sp.add_argument("--step", type=float, default=0.5, help="cell size (m)")
+    sp.add_argument("--confirm", type=float, default=0.10, help="second flight must agree within this (m)")
+    sp.add_argument("--min-drop", type=float, default=0.10, help="patch only where ground is this far below (m)")
+    sp.add_argument("--min-area", type=float, default=4.0, help="drop patch pieces smaller than this (m2)")
+    sp.add_argument("--name"); sp.add_argument("--download", action="store_true",
+                                               help="allow reading OneDrive online-only files (downloads them)")
     sp = sub.add_parser("todxf"); sp.set_defaults(fn=cmd_todxf); sp.add_argument("xml", nargs="+"); sp.add_argument("--out")
     sp = sub.add_parser("rebuild-source"); sp.set_defaults(fn=cmd_rebuild_source); sp.add_argument("xml"); sp.add_argument("out")
     sp.add_argument("--bbox", type=float, nargs=4, metavar=("EMIN", "NMIN", "EMAX", "NMAX"))

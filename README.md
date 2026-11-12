@@ -15,6 +15,7 @@ python -m surfpatch cut      SURF.xml OUT.xml --csv BAD.csv ... [--code REGEX] [
 python -m surfpatch cut      SURF.xml OUT.xml --boundary AREA.dxf               remove every vertex inside
 python -m surfpatch insert   SURF.xml OUT.xml --csv SHOTS.csv ... [--code REGEX] [--boundary AREA.dxf]
 python -m surfpatch diff     NEW.xml OLD.xml [--boundary AREA.dxf] [--step 0.25]  volume NEW - OLD
+python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary AREA.dxf] [--check TLS.laz]
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
 ```
@@ -28,11 +29,22 @@ python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMA
   columns are `--order PNEZD`.
 - `rebuild-source` turns a TBC "source data only" export (2-point breaklines = TIN edges, no faces) back into a
   TIN. It streams the file, so 100+ MB exports are fine.
+- `drone` patches a surface that is out of date because the ground was dug lower after it was built. The flights
+  are binned into 0.5 m cells (`--step`), taking each flight's median Z per cell. A cell's ground is the lowest
+  value that a second flight confirms within 0.10 m (`--confirm`), so one bad or low flight is never used on its
+  own. The patch covers only cells where that ground is more than 0.10 m below the surface (`--min-drop`). Wall
+  cells (high spread or steeper than 45 deg) are not trusted. Neither are cells where an independent `--check`
+  cloud (e.g. a terrestrial scan) disagrees by more than 0.25 m. Small pieces under 4 m2 (`--min-area`) are
+  dropped. The patch never raises the surface. It writes `NAME.xml` (grid TIN), `NAME.csv` (PNEZD) and
+  `NAME BNDY.dxf` to OUT_DIR, for pasting into the composite in TBC. OneDrive online-only flights are skipped
+  unless `--download` is given.
 - Multi-surface files: `--surface NAME`.
 
 Checked on real data: `cut` on a 14,000-point original-ground surface, using three CSVs of wrongly included
 post-excavation shots, reproduced a hand-built repair exactly. It had the same points and faces and zero volume
-difference, and spikes in the bad area went from 98 to 0.
+difference, and spikes in the bad area went from 98 to 0. `drone` was checked against a hand-built patch of a
+1,600 m2 excavation composite. With 8 of the original 11 weekly flights it matched exactly on 75% of the shared
+area. The rest differs where the 3 missing flights had supplied the lower ground.
 
 ## Library
 
@@ -46,6 +58,9 @@ r = compare.diff((P, F), (s.points, s.faces), step=0.25, polygon=io.read_boundar
 z = compare.Sampler(P, F)(east_array, north_array)            # NaN off the surface
 v, dz = compare.spikes(P, F)
 x, y, z, cls = io.clip_las("flight.laz", (emin, nmin, emax, nmax))   # None if online-only / outside
+from surfpatch import drone
+r = drone.drone_patch(P, F, [(x1, y1, z1), (x2, y2, z2), ...], mask_polygon=None, check=None)
+r.points, r.faces, r.stats                                      # patch TIN + area / volume / flights used
 ```
 
 `mesh.PatchError` is raised instead of returning a bad TIN.
@@ -58,8 +73,8 @@ data. Standalone: `uv sync` here (needs `../rxlkit`).
 
 ## Not yet
 
-Drone-cloud patching (lowest-confirmed-flight grid, as in the OG rock job's `mcb_patch.py`), and tracing via
-file-finder's footprints index (the job's `trace.py` does both).
+Tracing via file-finder's footprints index (finding the candidate CSVs automatically); `trace` takes the CSVs
+to check as arguments.
 
 ## License
 

@@ -102,10 +102,37 @@ def read_shots_many(paths, order="PNEZD", code=None):
 
 # ---------------------------------------------------------------- DXF
 
+def _read_polygons_raw(path):
+    """Plain group-code reader for (LW)POLYLINE vertices, for minimal DXFs ezdxf rejects (e.g. LWPOLYLINE
+    without subclass markers, as older job scripts wrote)."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = [ln.strip() for ln in fh]
+    polys, cur, ent, x = [], None, None, None
+    for code, val in zip(lines[0::2], lines[1::2]):
+        if code == "0":
+            if val in ("POLYLINE", "LWPOLYLINE"):
+                cur = []
+                polys.append(cur)
+            elif val != "VERTEX":
+                cur = None
+            ent, x = val, None
+        elif cur is not None and ent in ("VERTEX", "LWPOLYLINE"):
+            if code == "10":
+                x = float(val)
+            elif code == "20" and x is not None:
+                cur.append((x, float(val)))
+                x = None
+    return [np.array(p, float) for p in polys if len(p) >= 3]
+
+
 def read_polygons(path):
     """2D/3D polylines with >= 3 vertices from a DXF, as (k, 2) east/north arrays."""
     from ezdxf import recover
-    doc, _ = recover.readfile(str(path))
+    from ezdxf.lldxf.const import DXFError
+    try:
+        doc, _ = recover.readfile(str(path))
+    except DXFError:
+        return _read_polygons_raw(path)
     out = []
     for ent in doc.modelspace():
         t = ent.dxftype()
@@ -159,6 +186,30 @@ def write_dxf_mesh(path, surfaces):
         fh.write("\n".join(out) + "\n")
 
 
+def write_dxf_polylines(path, loops, layer="BOUNDARY", closed=True):
+    """R12 DXF of 2D polylines (POLYLINE/VERTEX/SEQEND - every reader takes these), e.g. patch outlines.
+    loops: lists of (east, north)."""
+    lay = _layer(layer)
+    out = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "0", "ENDSEC",
+           "0", "SECTION", "2", "ENTITIES"]
+    for lp in loops:
+        out += ["0", "POLYLINE", "8", lay, "66", "1", "10", "0.0", "20", "0.0", "30", "0.0",
+                "70", "1" if closed else "0"]
+        for x, y in lp:
+            out += ["0", "VERTEX", "8", lay, "10", f"{x:.3f}", "20", f"{y:.3f}", "30", "0.0"]
+        out += ["0", "SEQEND", "8", lay]
+    out += ["0", "ENDSEC", "0", "EOF"]
+    with open(path, "w", encoding="ascii", newline="\r\n") as fh:
+        fh.write("\n".join(out) + "\n")
+
+
+def write_pnezd(path, points, code="", start=1):
+    """PNEZD CSV (no header) of points given as (north, east, z)."""
+    with open(path, "w", encoding="ascii", newline="\r\n") as fh:
+        for k, (n, e, z) in enumerate(points, start):
+            fh.write(f"{k},{n:.4f},{e:.4f},{z:.4f},{code}\n")
+
+
 # ---------------------------------------------------------------- TBC source-data-only exports
 
 def read_source_only(path, bbox=None, max_edge=15.0, name=None):
@@ -169,7 +220,9 @@ def read_source_only(path, bbox=None, max_edge=15.0, name=None):
     key, V, E = {}, [], set()
 
     def vid(n, e, z):
-        k = (round(e, 3), round(n, 3))
+        # snap to 0.1 mm, the precision LandXML is written at, so the TIN checked here is the one written
+        n, e, z = round(n, 4), round(e, 4), round(z, 4)
+        k = (e, n)
         if k not in key:
             key[k] = len(V)
             V.append((n, e, z))
