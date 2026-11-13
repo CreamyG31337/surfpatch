@@ -43,6 +43,7 @@ ALPHA, MESH_GREY = 0.6, 0.62
 GRID_MAJOR = dict(color="0.35", lw=0.7, label="#1f3b5a", size=10)
 GRID_MINOR = dict(color="0.7", lw=0.4, label="#5f7891", size=8)
 OUTLINE_LW, OUTLINE_C = 0.6, "#b0189a"
+DAYLIGHT_LW, DAYLIGHT_C = 0.6, "#1e8c1e"                 # 0.00 line (design daylights through the scan)
 DEFAULTS = {"wall_names": {"L": "LEFT", "R": "RIGHT"}, "tcf": None,
             "grid": {"major_sta": 10, "minor_sta": 5, "major_el": 10, "minor_el": 5},
             "max_edge": 3.0, "toe_margin": 0.3, "max_dist": 3.0, "thin_cell": "auto", "label_cell": "auto",
@@ -267,6 +268,9 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     ax.tricontourf(tri, cf, levels=levels, colors=colours, alpha=ALPHA, zorder=1)
     for a, b in outline_segments(tri):
         ax.plot([s[a], s[b]], [Z[a], Z[b]], color=OUTLINE_C, lw=OUTLINE_LW, zorder=3, solid_capstyle="round")
+    daylight = bool((cf.min() < 0 < cf.max()))
+    if daylight:                                       # 0.00 cut/fill line, as TBC draws it
+        ax.tricontour(tri, cf, levels=[0.0], colors=[DAYLIGHT_C], linewidths=DAYLIGHT_LW, zorder=3)
     lab_cell = cfg["label_cell"]
     if lab_cell == "auto":                             # a label is ~24 x 9 pt at 6.5 pt type; keep them apart
         cell = (38 / pt_per_m, 13 / pt_per_m)
@@ -321,6 +325,7 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
            "bands": [{"color": as_drawn(colours[i]), "text": f"{areas[i]:.1f} m2"} for i in reversed(keep)],
            "breaks": [f"{abs(levels[i]):.3f} {'C' if levels[i] < 0 else 'F'}" for i in reversed(keep) if i > keep[0]]}
     return {"bar": bar, "area": float(areas.sum()), "toe_shown": toe_shown, "labels_all": not lab_cell,
+            "daylight": daylight,
             "bands": {f"{levels[i]:+.3f}..{levels[i + 1]:+.3f}": float(areas[i]) for i in keep}}
 
 
@@ -363,7 +368,11 @@ def sheet_job(cfg, design, scan_names, pages, map_pdf, out_pdf, stem=""):
         info, lr = p["info"], ("LT" if p["side"] == "L" else "RT")
         rng = f"{fmt_sta(p['s0'])} TO {fmt_sta(p['s1'])}"
         legend = [info["bar"],
-                  {"kind": "line", "color": OUTLINE_C, "width": 1.0, "label": "OUTLINE OF THE SCANNED AREA"},
+                  {"kind": "line", "color": OUTLINE_C, "width": 1.0, "label": "OUTLINE OF THE SCANNED AREA"}]
+        if info.get("daylight"):
+            legend.append({"kind": "line", "color": DAYLIGHT_C, "width": 1.0,
+                           "label": "DAYLIGHT LINE: CUT/FILL = 0.000 (SCAN ON THE DESIGN SURFACE)"})
+        legend += [
                   {"kind": "line", "color": "#595959", "width": 0.7,
                    "label": "GRID: STATIONS AND ELEVATIONS (LIGHTER = MINOR)"},
                   {"kind": "text", "sample": "+ 0.123C", "label": "SCAN POINT AND ITS VALUE (m)"

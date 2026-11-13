@@ -96,6 +96,7 @@ def test_section_engine(site, tmp_path):
     assert job["pages"][0]["wall_name"] == "WEST (LEFT) WALL" and job["drawing_no"] == "261113-CF"
     bar = job["pages"][0]["legend"][0]
     assert bar["kind"] == "colorbar" and len(bar["breaks"]) == len(bar["bands"]) - 1
+    assert any("DAYLIGHT" in e.get("label", "") for e in job["pages"][0]["legend"])     # both C and F present
     assert (tmp_path / "out" / "261113-TEST C-F MAP - views.pdf").stat().st_size > 1000
 
 
