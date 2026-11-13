@@ -18,6 +18,7 @@ python -m surfpatch diff     NEW.xml OLD.xml [--boundary AREA.dxf] [--step 0.25]
 python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary AREA.dxf] [--check TLS.laz]
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
+python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
 ```
 
 - `cut --csv` removes the vertices that match a shot within 6 mm in 3D (`--tol`). The faces that used them are
@@ -39,6 +40,20 @@ python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMA
   `NAME BNDY.dxf` to OUT_DIR, for pasting into the composite in TBC. OneDrive online-only flights are skipped
   unless `--download` is given.
 - Multi-surface files: `--surface NAME`.
+- `cfmap` makes cut/fill map sheets of a wall scan against a design corridor (.rxl).
+  - **Distance:** each point is measured square to the design wall, by CloudCompare cloud-to-mesh (`surfpatch.cc`)
+    or, without CloudCompare, the design cross-section (`--engine section`). The wall mesh is built from the RXL
+    (`rxlkit.wall_surface`) unless the config names LandXML walls. Faces are wound up, i.e. toward the open side.
+  - **Points dropped:** floor points (below toe + `toe_margin`), points off the walls' station range, and points
+    more than `max_dist` from a wall.
+  - **Map:** each wall is unrolled to station / elevation and split into `sheet_length` (40 m) windows. Points are
+    triangulated, with triangles over `max_edge` dropped as gaps. The view is coloured with stepped TBC cut/fill
+    bands (a TBC `.tcf` file or the built-in scheme), outlined, and labelled C/F where the labels fit.
+  - **Sheets:** sheetwrap places the views on title-blocked sheets.
+  - **Outputs:** `STEM distances.csv`, `STEM C-F MAP - views.pdf`, `STEM C-F MAP - sheet.json` (editable;
+    rebuild with `python -m sheetwrap build`) and `STEM C-F MAP - TB.pdf`.
+  - **Config:** keys are listed in `surfpatch/cfmap.py`.
+  - **Sign:** distances.csv `dist` is + for rock inside the design (cut). The sheet shows TBC's C (cut) / F (fill).
 
 Checked on real data: `cut` on a 14,000-point original-ground surface, using three CSVs of wrongly included
 post-excavation shots, reproduced a hand-built repair exactly. It had the same points and faces and zero volume
@@ -64,6 +79,16 @@ r.points, r.faces, r.stats                                      # patch TIN + ar
 ```
 
 `mesh.PatchError` is raised instead of returning a bad TIN.
+
+```python
+from surfpatch import cc, cfmap
+d = cc.c2m(points_enz, V_enz, F)            # signed cloud-to-mesh via CloudCompare -SILENT (+ = normal side)
+r = cfmap.run("site_cfmap.json", ["scan.csv"], "out")   # same as the cfmap command; returns paths + stats
+```
+
+`cc` finds CloudCompare from `$CLOUDCOMPARE_EXE` or `C:\Projects\cloudcompare\CloudCompare_*_bin_x64`. It shifts
+UTM coordinates to a local origin, runs CloudCompare inside the work folder (its `-SAVE_CLOUDS FILE` splits on
+spaces), and checks that the results come back in input order. Tests that need CloudCompare skip without it.
 
 ## Install / test
 

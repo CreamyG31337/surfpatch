@@ -1,7 +1,8 @@
 # surfpatch
 
 Tool repo: check and repair LandXML TIN surfaces built from survey data. v0.1 (2026-11-11) has these CLI
-commands: `info`, `spikes`, `sparse`, `trace`, `cut`, `insert`, `diff`, `drone`, `todxf`, `rebuild-source`.
+commands: `info`, `spikes`, `sparse`, `trace`, `cut`, `insert`, `diff`, `drone`, `todxf`, `rebuild-source`,
+`cfmap` (added 2026-11-13).
 See README.md.
 
 - `surfpatch/mesh.py`: local re-triangulation core (`retriangulate`, `remove_vertices`, `insert_points`,
@@ -14,7 +15,12 @@ See README.md.
   `confirmed_lowest`, `grid_tin`, `region_outline`. Ported from the job's `mcb_patch.py`; the site-specific
   "only where the composite came from the 26-07 surface" mask became the generic `mask_polygon`/`--boundary`,
   and the Sep TLS check became `check`/`--check`.
-- `tests/test_surfpatch.py`, `tests/test_drone.py`: synthetic data at site-scale coordinates.
+- `surfpatch/cc.py`: CloudCompare command-line wrapper (`find_exe`, `run`, `c2m`). Arrays are (east, north, z).
+- `surfpatch/cfmap.py`: cut/fill map sheets of wall scans vs an .rxl corridor. Ported 2026-11-13 from
+  `jobs\2026-11-13 LLO channel folder cleanup\cc_wall_compare.py`; the site config is `llo_cfmap.json` there.
+  Design wall faces are wound up (CCW in plan), not "toward the CL", which got corner cross faces wrong.
+- `tests/test_surfpatch.py`, `tests/test_drone.py`, `tests/test_cfmap.py`: synthetic data at site-scale
+  coordinates. The CloudCompare tests skip when it isn't installed.
 
 Source material (kept as the record): `C:\Projects\jobs\2026-11-05 OG rock + MCB surface repair\scripts\`, plus
 `og_patch.py`/`tin_diff.py` in `jobs\2026-11-10 channel wall asbuilt` and `jobs\2026-11-06 LLO wall meshes dxf`.

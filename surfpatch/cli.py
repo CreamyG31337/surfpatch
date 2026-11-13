@@ -10,6 +10,7 @@
   drone    XML OUT_DIR --laz F...          patch where 2 drone flights agree the ground is lower
   todxf    XML...                          LandXML TIN -> DXF polyface mesh
   rebuild-source XML OUT                   TBC source-data-only export -> TIN
+  cfmap    CONFIG SCAN... --out DIR        cut/fill map sheets of scanned walls vs a design corridor (.rxl)
 
 CSV arguments accept wildcards. Surfaces are read/written with rxlkit.landxml; every written TIN passes
 rxlkit.tin.quality_ok and an area check.
@@ -245,6 +246,26 @@ def cmd_rebuild_source(a):
     print("wrote", a.out)
 
 
+def cmd_cfmap(a):
+    from . import cfmap
+    cfg = cfmap.load_config(a.config)
+    if a.engine:
+        cfg["engine"] = a.engine
+    r = cfmap.run(cfg, _csvs(a.scan), a.out, name=a.name, order=a.order, download=a.download,
+                  build_sheet=not a.no_sheet)
+    print(f"{r['points']} points, {r['used']} used (on a wall, above toe + margin, within max_dist); "
+          f"engine {r['engine']}" + (f", max diff vs design sections {r['check_max_diff']:.3f} m"
+                                     if r["engine"] == "cloudcompare" else ""))
+    for w in r["walls"]:
+        print(f"  {w['wall']} wall: {w['n']} pts, {fmt(w['s0'])}..{fmt(w['s1'])}, {w['area']:.1f} m2")
+    print(f"wrote {r['views']}\n      {r['job']}" + (f"\n      {r['sheet']}" if r["sheet"] else ""))
+
+
+def fmt(s):
+    from .cfmap import fmt_sta
+    return fmt_sta(s)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="surfpatch", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -295,6 +316,16 @@ def main(argv=None):
     sp = sub.add_parser("rebuild-source"); sp.set_defaults(fn=cmd_rebuild_source); sp.add_argument("xml"); sp.add_argument("out")
     sp.add_argument("--bbox", type=float, nargs=4, metavar=("EMIN", "NMIN", "EMAX", "NMAX"))
     sp.add_argument("--max-edge", type=float, default=15.0); sp.add_argument("--name")
+
+    sp = sub.add_parser("cfmap"); sp.set_defaults(fn=cmd_cfmap)
+    sp.add_argument("config", help="JSON config (see surfpatch.cfmap)")
+    sp.add_argument("scan", nargs="+", help="scan CSV / LAS / LAZ files (wildcards ok), combined")
+    sp.add_argument("--out", required=True, help="output folder")
+    sp.add_argument("--name", help="output file stem (default: first scan's name)")
+    sp.add_argument("--order", default="PNEZD", help="column order for CSVs without a header")
+    sp.add_argument("--engine", choices=["auto", "cloudcompare", "section"])
+    sp.add_argument("--no-sheet", action="store_true", help="map views + sheetwrap job only")
+    sp.add_argument("--download", action="store_true", help="allow reading OneDrive online-only LAZ")
 
     a = ap.parse_args(argv)
     try:
