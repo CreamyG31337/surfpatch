@@ -21,6 +21,9 @@ Config (JSON), all keys optional except "alignment":
   label_cell     m; at most one value label per cell; "auto" = every point when they fit, else spaced so
                  labels don't overlap at the drawing scale
   sheet_length   m of wall per sheet (default 40); longer walls get several sheets, on round stations
+  label_grid     m; label values interpolated at grid nodes this far apart (TBC labels a 0.6 m grid) instead of
+                 at scan points; 0 = off (default)
+  tcf_keep_top   true = keep the .tcf's last value as a break, coloured above with its colour (TBC's purple)
   engine         "cloudcompare", "section" or "auto"
   sheet          sheetwrap job values (project, datum, drawn_by, logo, extends, sheet_size, ...); "title" may use
                  {wall}; "notes" are added after the standard notes, {scan} and {design} are filled in
@@ -53,16 +56,19 @@ DEFAULTS = {"wall_names": {"L": "LEFT", "R": "RIGHT"}, "tcf": None,
 
 # ---------------------------------------------------------------- colours, labels
 
-def read_tcf(path):
+def read_tcf(path, keep_top=False):
     """TBC colour mapping (.tcf XML) -> (inner breaks, colours), len(colours) == len(breaks) + 1.
-    Stepped: colour i fills [value i, value i+1). The first and last values are only the min/max of the map the
-    file was saved from, so they are not breaks: the first colour fills everything below the second value, and
-    the last entry's colour (which only marks the top) is not used. Duplicate values are dropped."""
+    Stepped: colour i fills [value i, value i+1). The first and last values are normally only the min/max of the
+    map the file was saved from, so they are not breaks: the first colour fills everything below the second
+    value, and the last entry's colour (which only marks the top) is not used. keep_top=True keeps the last value
+    as a break with its colour above it, as TBC draws it (e.g. purple over 0.714 F). Duplicates are dropped."""
     vals = [(float(v.findtext("elevation")),
              tuple(int(v.findtext(c)) / 255 for c in ("Red", "Green", "Blue")))
             for v in ET.parse(path).getroot().iter("value")]
     vals = sorted(vals, key=lambda v: v[0])
     vals = [v for i, v in enumerate(vals) if i == len(vals) - 1 or v[0] < vals[i + 1][0]]
+    if keep_top:
+        return [v[0] for v in vals[1:]], [v[1] for v in vals]
     return [v[0] for v in vals[1:-1]], [v[1] for v in vals[:-1]]
 
 
@@ -271,17 +277,35 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     daylight = bool((cf.min() < 0 < cf.max()))
     if daylight:                                       # 0.00 cut/fill line, as TBC draws it
         ax.tricontour(tri, cf, levels=[0.0], colors=[DAYLIGHT_C], linewidths=DAYLIGHT_LW, zorder=3)
-    lab_cell = cfg["label_cell"]
-    if lab_cell == "auto":                             # a label is ~24 x 9 pt at 6.5 pt type; keep them apart
-        cell = (38 / pt_per_m, 13 / pt_per_m)
-        nn = len(s) / max(1e-9, (s.max() - s.min() + 1) * (Z.max() - Z.min() + 1))
-        lab_cell = 0 if nn * cell[0] * cell[1] < 0.6 and len(s) <= 400 else cell
-    lm = label_mask(s, Z, lab_cell) & vis
-    ax.plot(s[lm], Z[lm], "+", color="0.35", ms=5, mew=0.6, zorder=4)
     halo = [pe.withStroke(linewidth=1.6, foreground=(1, 1, 1, 0.75))]
-    for x, z, v in zip(s[lm], Z[lm], cf[lm]):
-        ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=6.5, color="0.1",
-                    zorder=5, path_effects=halo)
+    lab_cell = cfg["label_cell"]
+    grid_step = cfg.get("label_grid") or 0
+    if grid_step:
+        # TBC style: values interpolated on the scan mesh at grid nodes (step m), '+' at each node; scan points
+        # as small dots. Type size so a label fits in one grid cell.
+        from matplotlib.tri import LinearTriInterpolator
+        gs = np.arange(np.ceil(max(s.min(), wa) / grid_step) * grid_step, min(s.max(), wb) + 1e-9, grid_step)
+        gz = np.arange(np.ceil(Z.min() / grid_step) * grid_step, Z.max() + 1e-9, grid_step)
+        GS, GZ = np.meshgrid(gs, gz)
+        gv = LinearTriInterpolator(tri, cf)(GS, GZ)
+        m = ~np.ma.getmaskarray(gv)
+        fs = float(np.clip(0.85 * grid_step * pt_per_m / 4.2, 3.0, 6.5))   # "0.123C" ~ 4 x size wide
+        ax.plot(s[vis], Z[vis], ".", color="0.35", ms=1.2, zorder=4)
+        ax.plot(GS[m], GZ[m], "+", color="0.3", ms=3, mew=0.4, zorder=4)
+        for x, z, v in zip(GS[m], GZ[m], np.asarray(gv)[m]):
+            ax.annotate(cf_label(v), (x, z), xytext=(1, 1), textcoords="offset points", fontsize=fs, color="0.1",
+                        zorder=5, path_effects=[pe.withStroke(linewidth=1.0, foreground=(1, 1, 1, 0.7))])
+        lab_cell = 0
+    else:
+        if lab_cell == "auto":                         # a label is ~24 x 9 pt at 6.5 pt type; keep them apart
+            cell = (38 / pt_per_m, 13 / pt_per_m)
+            nn = len(s) / max(1e-9, (s.max() - s.min() + 1) * (Z.max() - Z.min() + 1))
+            lab_cell = 0 if nn * cell[0] * cell[1] < 0.6 and len(s) <= 400 else cell
+        lm = label_mask(s, Z, lab_cell) & vis
+        ax.plot(s[lm], Z[lm], "+", color="0.35", ms=5, mew=0.6, zorder=4)
+        for x, z, v in zip(s[lm], Z[lm], cf[lm]):
+            ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=6.5, color="0.1",
+                        zorder=5, path_effects=halo)
 
     steps = [round(b, 2) for a, b in design.cor.steps() if s0 <= b <= s1]
     lines = {b: True for b in steps}
@@ -325,6 +349,7 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
            "bands": [{"color": as_drawn(colours[i]), "text": f"{areas[i]:.1f} m2"} for i in reversed(keep)],
            "breaks": [f"{abs(levels[i]):.3f} {'C' if levels[i] < 0 else 'F'}" for i in reversed(keep) if i > keep[0]]}
     return {"bar": bar, "area": float(areas.sum()), "toe_shown": toe_shown, "labels_all": not lab_cell,
+            "label_grid": grid_step,
             "daylight": daylight,
             "bands": {f"{levels[i]:+.3f}..{levels[i + 1]:+.3f}": float(areas[i]) for i in keep}}
 
@@ -375,8 +400,11 @@ def sheet_job(cfg, design, scan_names, pages, map_pdf, out_pdf, stem=""):
         legend += [
                   {"kind": "line", "color": "#595959", "width": 0.7,
                    "label": "GRID: STATIONS AND ELEVATIONS (LIGHTER = MINOR)"},
-                  {"kind": "text", "sample": "+ 0.123C", "label": "SCAN POINT AND ITS VALUE (m)"
-                   + ("" if p["labels_all"] else ", ONE PER CELL")}]
+                  ({"kind": "text", "sample": "+ 0.123C",
+                    "label": f"VALUE (m) AT A {info['label_grid']:g} m GRID NODE, INTERPOLATED FROM THE SCAN; "
+                             "DOTS = SCAN POINTS"} if info.get("label_grid") else
+                   {"kind": "text", "sample": "+ 0.123C", "label": "SCAN POINT AND ITS VALUE (m)"
+                    + ("" if p["labels_all"] else ", ONE PER CELL")})]
         if info["toe_shown"]:
             legend.append({"kind": "line", "color": "#8b4513", "width": 1.2, "label": "DESIGN TOE (DASHED)"})
         job["pages"].append({
@@ -478,7 +506,7 @@ def run(cfg, scans, out_dir, name=None, order="PNEZD", download=False, build_she
                         int(ok[i]), "" if np.isnan(d[i]) else round(d[i], 3),
                         "" if np.isnan(d_sec[i]) else round(d_sec[i], 3)])
 
-    bands = read_tcf(cfg["tcf"]) if cfg.get("tcf") else DEFAULT_BANDS
+    bands = read_tcf(cfg["tcf"], cfg.get("tcf_keep_top", False)) if cfg.get("tcf") else DEFAULT_BANDS
     map_pdf = out / f"{stem} C-F MAP - views.pdf"
     pages = []
     with PdfPages(map_pdf) as pdf:

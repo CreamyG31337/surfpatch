@@ -81,6 +81,8 @@ def test_read_tcf_drops_saved_min_max_and_duplicates(tmp_path):
     breaks, colours = cfmap.read_tcf(p)
     assert breaks == [-0.3, -0.1, 0.1, 0.3]
     assert len(colours) == 5 and colours[0] == (1, 0, 0) and colours[-1] == (0, 0, 1)   # purple top unused
+    breaks, colours = cfmap.read_tcf(p, keep_top=True)                                   # TBC's purple kept
+    assert breaks == [-0.3, -0.1, 0.1, 0.3, 0.71] and colours[-1] == (128 / 255, 0, 128 / 255)
 
 
 def test_section_engine(site, tmp_path):
@@ -98,6 +100,13 @@ def test_section_engine(site, tmp_path):
     assert bar["kind"] == "colorbar" and len(bar["breaks"]) == len(bar["bands"]) - 1
     assert any("DAYLIGHT" in e.get("label", "") for e in job["pages"][0]["legend"])     # both C and F present
     assert (tmp_path / "out" / "261113-TEST C-F MAP - views.pdf").stat().st_size > 1000
+
+
+def test_label_grid(site, tmp_path):
+    cfg, scan, _ = site
+    r = cfmap.run(dict(cfg, engine="section", label_grid=0.6), [scan], tmp_path / "g", build_sheet=False)
+    job = json.loads((tmp_path / "g" / "261113-TEST C-F MAP - sheet.json").read_text())
+    assert any("0.6 m GRID NODE" in e.get("label", "") for e in job["pages"][0]["legend"])
 
 
 def test_windows_split_long_walls_on_round_stations():
