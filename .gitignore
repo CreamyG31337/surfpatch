@@ -13,3 +13,5 @@ data/
 __pycache__/
 .venv/
 *.egg-info/
+# generated knowledge graph
+graphify-out/
