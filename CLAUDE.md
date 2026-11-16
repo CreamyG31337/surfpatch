@@ -20,7 +20,8 @@ See README.md.
   `jobs\2026-11-13 LLO channel folder cleanup\cc_wall_compare.py`; the site config is `llo_cfmap.json` there.
   Design wall faces are wound up (CCW in plan), not "toward the CL", which got corner cross faces wrong.
 - `surfpatch/labels.py` (2026-11-16): `place_labels`, overlap-free point labels in one greedy pass (8 positions
-  beside the point, then rings on leaders, else dropped; priority = input order). cfmap feeds it biggest |C/F| first.
+  beside the point, then rings on leaders, else dropped; priority = input order). EXPERIMENTAL: cfmap uses it only with config `"label_place": true`; the default is the
+  original fixed-offset labels (user preferred their regular look on evenly spaced scans).
 - `tests/test_surfpatch.py`, `tests/test_drone.py`, `tests/test_cfmap.py`: synthetic data at site-scale
   coordinates. The CloudCompare tests skip when it isn't installed.
 

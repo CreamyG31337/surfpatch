@@ -18,9 +18,11 @@ Config (JSON), all keys optional except "alignment":
   toe_margin     m; points below design toe + this are floor and dropped (default 0.3)
   max_dist       m; points farther than this from the wall are dropped (default 3)
   thin_cell      m; average points into cells this size in the unrolled view; "auto" = 0.1 m above 20k points
-  label_cell     m; at most one value label candidate per cell; "auto" = every point up to label_all_max (600)
-                 visible points, else one per label-sized cell. Candidates are then placed without overlaps by
-                 surfpatch.labels: beside the point, else on a short leader, else omitted (biggest |C/F| first)
+  label_cell     m; at most one value label per cell; "auto" = every point when they fit, else spaced so
+                 labels don't overlap at the drawing scale
+  label_place    EXPERIMENTAL, default false: place labels without overlaps (surfpatch.labels): beside the point,
+                 else on a short leader, else omitted (biggest |C/F| first); "auto" label_cell then labels up to
+                 label_all_max (600) points
   sheet_length   m of wall per sheet (default 40); longer walls get several sheets, on round stations
   label_grid     m; label values interpolated at grid nodes this far apart (TBC labels a 0.6 m grid) instead of
                  at scan points; 0 = off (default)
@@ -245,6 +247,26 @@ def label_mask(s, z, cell):
 AX_W, AX_H = 14 * 72 * 0.86, 8.5 * 72 * 0.82          # map axes size (pt) on the view page
 
 
+def _placed_labels(ax, s, Z, cf, idx, side, s0, s1, z0, z1, pt_per_m, halo, fs=6.5):
+    """Experimental (config "label_place": true): overlap-free value labels via surfpatch.labels - beside the
+    point, else on a short leader, else omitted; biggest |C/F| first. Returns (placed, on leaders, candidates)."""
+    idx = idx[np.argsort(-np.abs(cf[idx]), kind="stable")]
+    texts = [cf_label(v) for v in cf[idx]]
+    sz = {t: text_size(t, fs) for t in set(texts)}
+    xd = ((s[idx] - s0) if side != "R" else (s1 - s[idx])) * pt_per_m   # east wall: station increases left
+    yd = (Z[idx] - z0) * pt_per_m
+    placed = place_labels(np.c_[xd, yd], [sz[t] for t in texts], (0, 0, (s1 - s0) * pt_per_m, (z1 - z0) * pt_per_m))
+    for p in placed:
+        k = idx[p.i]
+        ax.annotate(texts[p.i], (s[k], Z[k]), xytext=(p.cx - xd[p.i], p.cy - yd[p.i]), textcoords="offset points",
+                    fontsize=fs, color="0.1", ha="center", va="center", zorder=5, path_effects=halo)
+        if p.leader:
+            ax.annotate("", (s[k], Z[k]), xytext=(p.leader[2] - xd[p.i], p.leader[3] - yd[p.i]),
+                        textcoords="offset points", zorder=4,
+                        arrowprops=dict(arrowstyle="-", color="0.3", lw=0.45, shrinkA=0, shrinkB=2.2))
+    return len(placed), sum(p.leader is not None for p in placed), len(idx)
+
+
 def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     """One unrolled wall view (VE 1.0) to `pdf`. `window` = (from, to) station: the view shows that range
     (points slightly beyond it keep the mesh continuous at the edges). Returns the legend bar and stats."""
@@ -304,30 +326,22 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
         # Labels go through the overlap-free placer (surfpatch.labels): next to the point if there is room, else
         # on a short leader, else left off (the + stays). Big scans are first thinned to one candidate per
         # label-sized cell so the labels that survive are spread evenly.
-        if lab_cell == "auto":
+        place = cfg.get("label_place", False)          # experimental (2026-11-16); off = the original look
+        if lab_cell == "auto" and place:
             lab_cell = 0 if vis.sum() <= cfg.get("label_all_max", 600) else (38 / pt_per_m, 13 / pt_per_m)
+        elif lab_cell == "auto":                       # a label is ~24 x 9 pt at 6.5 pt type; keep them apart
+            cell = (38 / pt_per_m, 13 / pt_per_m)
+            nn = len(s) / max(1e-9, (s.max() - s.min() + 1) * (Z.max() - Z.min() + 1))
+            lab_cell = 0 if nn * cell[0] * cell[1] < 0.6 and len(s) <= 400 else cell
         lm = label_mask(s, Z, lab_cell) & vis
         ax.plot(s[lm], Z[lm], "+", color="0.35", ms=5, mew=0.6, zorder=4)
         idx = np.flatnonzero(lm)
-        idx = idx[np.argsort(-np.abs(cf[idx]), kind="stable")]   # biggest cut/fill first: they get the best spots
-        texts = [cf_label(v) for v in cf[idx]]
-        fs = 6.5
-        sz = {t: text_size(t, fs) for t in set(texts)}
-        flip = -1 if side == "R" else 1                         # east wall is drawn with station increasing left
-        xd = ((s[idx] - s0) if flip == 1 else (s1 - s[idx])) * pt_per_m
-        yd = (Z[idx] - z0) * pt_per_m
-        placed = place_labels(np.c_[xd, yd], [sz[t] for t in texts],
-                              (0, 0, (s1 - s0) * pt_per_m, (z1 - z0) * pt_per_m))
-        for p in placed:
-            k = idx[p.i]
-            off = (p.cx - xd[p.i], p.cy - yd[p.i])
-            ax.annotate(texts[p.i], (s[k], Z[k]), xytext=off, textcoords="offset points", fontsize=fs,
-                        color="0.1", ha="center", va="center", zorder=5, path_effects=halo)
-            if p.leader:
-                ax.annotate("", (s[k], Z[k]), xytext=(p.leader[2] - xd[p.i], p.leader[3] - yd[p.i]),
-                            textcoords="offset points", zorder=4,
-                            arrowprops=dict(arrowstyle="-", color="0.3", lw=0.45, shrinkA=0, shrinkB=2.2))
-        n_lab, n_lead, n_cand = len(placed), sum(p.leader is not None for p in placed), len(idx)
+        if not place:
+            for x, z, v in zip(s[lm], Z[lm], cf[lm]):
+                ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=6.5,
+                            color="0.1", zorder=5, path_effects=halo)
+        elif len(idx):
+            n_lab, n_lead, n_cand = _placed_labels(ax, s, Z, cf, idx, side, s0, s1, z0, z1, pt_per_m, halo)
 
     steps = [round(b, 2) for a, b in design.cor.steps() if s0 <= b <= s1]
     lines = {b: True for b in steps}
@@ -427,7 +441,8 @@ def sheet_job(cfg, design, scan_names, pages, map_pdf, out_pdf, stem=""):
                     "label": f"VALUE (m) AT A {info['label_grid']:g} m GRID NODE, INTERPOLATED FROM THE SCAN; "
                              "DOTS = SCAN POINTS"} if info.get("label_grid") else
                    {"kind": "text", "sample": "+ 0.123C", "label": "SCAN POINT AND ITS VALUE (m)"
-                    + ("" if p["labels_all"] else "; VALUES LEFT OFF WHERE THEY WOULD OVERLAP")})]
+                    + ("" if p["labels_all"] else
+                       "; VALUES LEFT OFF WHERE THEY WOULD OVERLAP" if p.get("label_place") else ", ONE PER CELL")})]
         if info["toe_shown"]:
             legend.append({"kind": "line", "color": "#8b4513", "width": 1.2, "label": "DESIGN TOE (DASHED)"})
         job["pages"].append({
@@ -556,7 +571,7 @@ def run(cfg, scans, out_dir, name=None, order="PNEZD", download=False, build_she
                               "n": int(kin.sum()), "s0": float(s[kin].min()), "s1": float(s[kin].max()),
                               "o0": float(np.abs(o[kin]).min()), "o1": float(np.abs(o[kin]).max()),
                               "z0": float(P[kin, 2].min()), "z1": float(P[kin, 2].max()), "engine": engine,
-                              "labels_all": info["labels_all"]})
+                              "labels_all": info["labels_all"], "label_place": bool(cfg.get("label_place"))})
     if not pages:
         raise ValueError("no wall has 3 or more usable scan points")
     out_pdf = out / f"{stem} C-F MAP - TB.pdf"
