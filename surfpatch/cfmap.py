@@ -20,6 +20,7 @@ Config (JSON), all keys optional except "alignment":
   thin_cell      m; average points into cells this size in the unrolled view; "auto" = 0.1 m above 20k points
   label_cell     m; at most one value label per cell; "auto" = every point when they fit, else spaced so
                  labels don't overlap at the drawing scale
+  label_size     pt, type size of the scan-point value labels (default 6.5)
   label_place    EXPERIMENTAL, default false: place labels without overlaps (surfpatch.labels): beside the point,
                  else on a short leader, else omitted (biggest |C/F| first); "auto" label_cell then labels up to
                  label_all_max (600) points
@@ -306,6 +307,7 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     lab_cell = cfg["label_cell"]
     grid_step = cfg.get("label_grid") or 0
     n_lab = n_lead = n_cand = 0
+    lab_fs = float(cfg.get("label_size", 6.5))         # pt, scan-point value labels
     if grid_step:
         # TBC style: values interpolated on the scan mesh at grid nodes (step m), '+' at each node; scan points
         # as small dots. Type size so a label fits in one grid cell.
@@ -338,10 +340,10 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
         idx = np.flatnonzero(lm)
         if not place:
             for x, z, v in zip(s[lm], Z[lm], cf[lm]):
-                ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=6.5,
+                ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=lab_fs,
                             color="0.1", zorder=5, path_effects=halo)
         elif len(idx):
-            n_lab, n_lead, n_cand = _placed_labels(ax, s, Z, cf, idx, side, s0, s1, z0, z1, pt_per_m, halo)
+            n_lab, n_lead, n_cand = _placed_labels(ax, s, Z, cf, idx, side, s0, s1, z0, z1, pt_per_m, halo, lab_fs)
 
     steps = [round(b, 2) for a, b in design.cor.steps() if s0 <= b <= s1]
     lines = {b: True for b in steps}
