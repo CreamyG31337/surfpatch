@@ -18,8 +18,9 @@ Config (JSON), all keys optional except "alignment":
   toe_margin     m; points below design toe + this are floor and dropped (default 0.3)
   max_dist       m; points farther than this from the wall are dropped (default 3)
   thin_cell      m; average points into cells this size in the unrolled view; "auto" = 0.1 m above 20k points
-  label_cell     m; at most one value label per cell; "auto" = every point when they fit, else spaced so
-                 labels don't overlap at the drawing scale
+  label_cell     m; at most one value label candidate per cell; "auto" = every point up to label_all_max (600)
+                 visible points, else one per label-sized cell. Candidates are then placed without overlaps by
+                 surfpatch.labels: beside the point, else on a short leader, else omitted (biggest |C/F| first)
   sheet_length   m of wall per sheet (default 40); longer walls get several sheets, on round stations
   label_grid     m; label values interpolated at grid nodes this far apart (TBC labels a 0.6 m grid) instead of
                  at scan points; 0 = off (default)
@@ -37,6 +38,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
+
+from .labels import place_labels, text_size
 
 # TBC-like stepped bands when no .tcf is given: (inner breaks, colours) in TBC sign (negative = cut)
 DEFAULT_BANDS = ([-0.3, -0.2, -0.1, -0.03, 0.1, 0.2, 0.3],
@@ -280,6 +283,7 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     halo = [pe.withStroke(linewidth=1.6, foreground=(1, 1, 1, 0.75))]
     lab_cell = cfg["label_cell"]
     grid_step = cfg.get("label_grid") or 0
+    n_lab = n_lead = n_cand = 0
     if grid_step:
         # TBC style: values interpolated on the scan mesh at grid nodes (step m), '+' at each node; scan points
         # as small dots. Type size so a label fits in one grid cell.
@@ -297,15 +301,33 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
                         zorder=5, path_effects=[pe.withStroke(linewidth=1.0, foreground=(1, 1, 1, 0.7))])
         lab_cell = 0
     else:
-        if lab_cell == "auto":                         # a label is ~24 x 9 pt at 6.5 pt type; keep them apart
-            cell = (38 / pt_per_m, 13 / pt_per_m)
-            nn = len(s) / max(1e-9, (s.max() - s.min() + 1) * (Z.max() - Z.min() + 1))
-            lab_cell = 0 if nn * cell[0] * cell[1] < 0.6 and len(s) <= 400 else cell
+        # Labels go through the overlap-free placer (surfpatch.labels): next to the point if there is room, else
+        # on a short leader, else left off (the + stays). Big scans are first thinned to one candidate per
+        # label-sized cell so the labels that survive are spread evenly.
+        if lab_cell == "auto":
+            lab_cell = 0 if vis.sum() <= cfg.get("label_all_max", 600) else (38 / pt_per_m, 13 / pt_per_m)
         lm = label_mask(s, Z, lab_cell) & vis
         ax.plot(s[lm], Z[lm], "+", color="0.35", ms=5, mew=0.6, zorder=4)
-        for x, z, v in zip(s[lm], Z[lm], cf[lm]):
-            ax.annotate(cf_label(v), (x, z), xytext=(2, 2), textcoords="offset points", fontsize=6.5, color="0.1",
-                        zorder=5, path_effects=halo)
+        idx = np.flatnonzero(lm)
+        idx = idx[np.argsort(-np.abs(cf[idx]), kind="stable")]   # biggest cut/fill first: they get the best spots
+        texts = [cf_label(v) for v in cf[idx]]
+        fs = 6.5
+        sz = {t: text_size(t, fs) for t in set(texts)}
+        flip = -1 if side == "R" else 1                         # east wall is drawn with station increasing left
+        xd = ((s[idx] - s0) if flip == 1 else (s1 - s[idx])) * pt_per_m
+        yd = (Z[idx] - z0) * pt_per_m
+        placed = place_labels(np.c_[xd, yd], [sz[t] for t in texts],
+                              (0, 0, (s1 - s0) * pt_per_m, (z1 - z0) * pt_per_m))
+        for p in placed:
+            k = idx[p.i]
+            off = (p.cx - xd[p.i], p.cy - yd[p.i])
+            ax.annotate(texts[p.i], (s[k], Z[k]), xytext=off, textcoords="offset points", fontsize=fs,
+                        color="0.1", ha="center", va="center", zorder=5, path_effects=halo)
+            if p.leader:
+                ax.annotate("", (s[k], Z[k]), xytext=(p.leader[2] - xd[p.i], p.leader[3] - yd[p.i]),
+                            textcoords="offset points", zorder=4,
+                            arrowprops=dict(arrowstyle="-", color="0.3", lw=0.45, shrinkA=0, shrinkB=2.2))
+        n_lab, n_lead, n_cand = len(placed), sum(p.leader is not None for p in placed), len(idx)
 
     steps = [round(b, 2) for a, b in design.cor.steps() if s0 <= b <= s1]
     lines = {b: True for b in steps}
@@ -348,7 +370,8 @@ def map_page(pdf, design, s, Z, d, side, cfg, bands, window=None):
     bar = {"kind": "colorbar", "top": "FILLS", "bottom": "CUTS",
            "bands": [{"color": as_drawn(colours[i]), "text": f"{areas[i]:.1f} m2"} for i in reversed(keep)],
            "breaks": [f"{abs(levels[i]):.3f} {'C' if levels[i] < 0 else 'F'}" for i in reversed(keep) if i > keep[0]]}
-    return {"bar": bar, "area": float(areas.sum()), "toe_shown": toe_shown, "labels_all": not lab_cell,
+    return {"bar": bar, "area": float(areas.sum()), "toe_shown": toe_shown,
+            "labels_all": not lab_cell and n_lab == n_cand, "labels": (n_lab, n_lead, n_cand),
             "label_grid": grid_step,
             "daylight": daylight,
             "bands": {f"{levels[i]:+.3f}..{levels[i + 1]:+.3f}": float(areas[i]) for i in keep}}
@@ -404,7 +427,7 @@ def sheet_job(cfg, design, scan_names, pages, map_pdf, out_pdf, stem=""):
                     "label": f"VALUE (m) AT A {info['label_grid']:g} m GRID NODE, INTERPOLATED FROM THE SCAN; "
                              "DOTS = SCAN POINTS"} if info.get("label_grid") else
                    {"kind": "text", "sample": "+ 0.123C", "label": "SCAN POINT AND ITS VALUE (m)"
-                    + ("" if p["labels_all"] else ", ONE PER CELL")})]
+                    + ("" if p["labels_all"] else "; VALUES LEFT OFF WHERE THEY WOULD OVERLAP")})]
         if info["toe_shown"]:
             legend.append({"kind": "line", "color": "#8b4513", "width": 1.2, "label": "DESIGN TOE (DASHED)"})
         job["pages"].append({
@@ -526,6 +549,9 @@ def run(cfg, scans, out_dir, name=None, order="PNEZD", download=False, build_she
                 if near.sum() < 3 or kin.sum() < 1:
                     continue
                 info = map_page(pdf, design, ss[near], zz[near], dd[near], sd, cfg, bands, window=(wa, wb))
+                nl, nld, nc = info["labels"]
+                if nc:
+                    print(f"  labels {fmt_sta(wa)}..{fmt_sta(wb)}: {nl} of {nc} placed ({nld} on leaders)")
                 pages.append({"side": sd, "wall": cfg["wall_names"].get(sd, sd), "info": info,
                               "n": int(kin.sum()), "s0": float(s[kin].min()), "s1": float(s[kin].max()),
                               "o0": float(np.abs(o[kin]).min()), "o1": float(np.abs(o[kin]).max()),
