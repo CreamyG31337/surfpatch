@@ -66,7 +66,8 @@ area. The rest differs where the 3 missing flights had supplied the lower ground
 `isopach` overlays the two triangulations in plan (each triangle of one surface cut by the triangles of the
 other and by the boundary), so on every piece both surfaces are flat planes and the volume is exact. Pieces are
 also split at the cut/fill zero line and wherever either surface crosses an elevation-range limit. Checked
-against a TBC Earthwork Volume Report: elevation ranges where both used the same surfaces matched to 0.1 m3. It
+against two TBC Earthwork Volume Reports with the exact input surfaces (49,000 and 65,000 m3 cut): totals within
+0.01 %, fill, max depths and z range identical, all but two elevation ranges within 0.1 m3. It
 handles about 1 M triangles in 20-30 s. `diff` (grid sampling) is faster and, at 0.1 m cells, was within 0.005 %
 of `isopach` on that job; its error is at the surface and boundary edges.
 

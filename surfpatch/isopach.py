@@ -192,7 +192,8 @@ def _range_volume(T, Ahi, Alo, z1, z2):
 def bin_edges(zmin, zmax, interval, origin=0.0):
     """Elevation-range limits like TBC's report: multiples of interval (offset by origin), first/last at zmin/zmax."""
     e = np.arange(np.floor((zmin - origin) / interval) * interval + origin, zmax + interval, interval)
-    return np.unique(np.clip(e, zmin, zmax))
+    e = e[(e > zmin + 1e-6) & (e < zmax - 1e-6)]          # zmin on a limit (to rounding) must not add an empty range
+    return np.r_[zmin, e, zmax] if zmax > zmin else np.array([zmin, zmax])
 
 
 def isopach(initial, final, polygon=None, interval=None, origin=0.0, edges=None, zero_lines=False):

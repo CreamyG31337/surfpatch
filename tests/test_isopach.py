@@ -97,6 +97,14 @@ def test_zero_line_joined_and_cli(tmp_path):
     assert (tmp_path / "zero.dxf").exists()
 
 
+def test_bin_edges_no_empty_range_at_limit():
+    from surfpatch.isopach import bin_edges
+    for zmin in (197.0, 197.0 - 1e-12, 197.0 + 1e-12):
+        e = bin_edges(zmin, 233.967, 4, 1)
+        assert np.allclose(e[:3], [197, 201, 205], atol=1e-9) and e[-1] == 233.967 and (np.diff(e) > 0.5).all()
+    assert np.allclose(bin_edges(206.03, 233.33, 4, 1), [206.03, 209, 213, 217, 221, 225, 229, 233, 233.33])
+
+
 def test_empty_surface_message():
     with pytest.raises(ValueError, match="rebuild-source"):
         isopach((np.zeros((0, 3)), np.zeros((0, 3), int)), tin(lambda e, n: e))
