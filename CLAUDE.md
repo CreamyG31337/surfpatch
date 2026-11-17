@@ -2,13 +2,17 @@
 
 Tool repo: check and repair LandXML TIN surfaces built from survey data. v0.1 (2026-11-11) has these CLI
 commands: `info`, `spikes`, `sparse`, `trace`, `cut`, `insert`, `diff`, `drone`, `todxf`, `rebuild-source`,
-`cfmap` (added 2026-11-13).
+`cfmap` (added 2026-11-13), `isopach` (added 2026-11-17).
 See README.md.
 
 - `surfpatch/mesh.py`: local re-triangulation core (`retriangulate`, `remove_vertices`, `insert_points`,
   `locate`, `grow`). Every edit to a TIN goes through `retriangulate`, which constrains the region outline,
   filters by centroid-in-region, checks area, orients faces, and refuses (PatchError) if TIN quality gets worse.
 - `surfpatch/compare.py`: `Sampler`, `diff`, `spikes`, `sparse_regions`, `inside`.
+- `surfpatch/isopach.py` (2026-11-17): `isopach` = exact TIN-to-TIN cut/fill like TBC's Earthwork Volume Report
+  (plan overlay of both TINs via STRtree candidates + half-plane `clip`; boundary via shapely intersection +
+  constrained Delaunay only for pieces whose parents both cross it). Bins = overlap of [lower, upper] with each
+  elevation range, integrated exactly as max(plane - c, 0) terms. CLI `isopach`. `join_segments` for the zero line.
 - `surfpatch/io.py`: `read_shots` (CSV), `read_boundary`/`read_polygons` (ezdxf), `write_dxf_mesh`,
   `read_source_only`, `clip_las`, `is_online_only`.
 - `surfpatch/drone.py`: `drone_patch` (confirmed-lowest ground from repeat flights), `cell_stats`,

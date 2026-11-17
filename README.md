@@ -14,7 +14,9 @@ python -m surfpatch trace    SURF.xml --csv "DIR\*.csv" [--boundary B.dxf]      
 python -m surfpatch cut      SURF.xml OUT.xml --csv BAD.csv ... [--code REGEX] [--name "X REV1"]
 python -m surfpatch cut      SURF.xml OUT.xml --boundary AREA.dxf               remove every vertex inside
 python -m surfpatch insert   SURF.xml OUT.xml --csv SHOTS.csv ... [--code REGEX] [--boundary AREA.dxf]
-python -m surfpatch diff     NEW.xml OLD.xml [--boundary AREA.dxf] [--step 0.25]  volume NEW - OLD
+python -m surfpatch diff     NEW.xml OLD.xml [--boundary AREA.dxf] [--step 0.25]  volume NEW - OLD (grid, quick)
+python -m surfpatch isopach  OG.xml ASBUILT.xml [--boundary AREA.dxf] [--interval 4 --origin 1] [--zero-dxf ZERO.dxf]
+                             exact cut/fill, areas, max depths, volumes by elevation range (TBC Earthwork Volume Report)
 python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary AREA.dxf] [--check TLS.laz]
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
@@ -61,6 +63,14 @@ difference, and spikes in the bad area went from 98 to 0. `drone` was checked ag
 1,600 m2 excavation composite. With 8 of the original 11 weekly flights it matched exactly on 75% of the shared
 area. The rest differs where the 3 missing flights had supplied the lower ground.
 
+`isopach` overlays the two triangulations in plan (each triangle of one surface cut by the triangles of the
+other and by the boundary), so on every piece both surfaces are flat planes and the volume is exact. Pieces are
+also split at the cut/fill zero line and wherever either surface crosses an elevation-range limit. Checked
+against two TBC Earthwork Volume Reports with the exact input surfaces (49,000 and 65,000 m3 cut): totals within
+0.01 %, fill, max depths and z range identical, all but two elevation ranges within 0.1 m3. It
+handles about 1 M triangles in 20-30 s. `diff` (grid sampling) is faster and, at 0.1 m cells, was within 0.005 %
+of `isopach` on that job; its error is at the surface and boundary edges.
+
 ## Library
 
 ```python
@@ -70,6 +80,8 @@ from surfpatch import mesh, compare, io
 s = read_surface("og.xml")                                    # points (north, east, z), faces 0-based
 P, F, info = mesh.remove_vertices(s.points, s.faces, ids)     # or insert_points(P, F, pts) / retriangulate(...)
 r = compare.diff((P, F), (s.points, s.faces), step=0.25, polygon=io.read_boundary("area.dxf"))
+r = isopach.isopach((og.points, og.faces), (ab.points, ab.faces), polygon, interval=4, origin=1)
+#   r.cut, r.fill, r.area_cut, r.area_fill, r.area_compared, r.max_cut, r.max_fill, r.bins = [(z1, z2, cut, fill)]
 z = compare.Sampler(P, F)(east_array, north_array)            # NaN off the surface
 v, dz = compare.spikes(P, F)
 x, y, z, cls = io.clip_las("flight.laz", (emin, nmin, emax, nmax))   # None if online-only / outside
