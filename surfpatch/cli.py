@@ -6,7 +6,8 @@
   trace    XML --csv F...                  which CSV files the vertices came from
   cut      XML OUT (--csv F... | --boundary DXF)   remove vertices, re-triangulate only the hole
   insert   XML OUT --csv F...              add shots, re-triangulate only around them
-  diff     NEW OLD [--boundary DXF]        volume NEW - OLD
+  diff     NEW OLD [--boundary DXF]        volume NEW - OLD (quick, on a grid)
+  isopach  INITIAL FINAL [--boundary DXF]  exact cut/fill, areas, volumes by elevation range (like TBC's report)
   drone    XML OUT_DIR --laz F...          patch where 2 drone flights agree the ground is lower
   todxf    XML...                          LandXML TIN -> DXF polyface mesh
   rebuild-source XML OUT                   TBC source-data-only export -> TIN
@@ -184,6 +185,29 @@ def cmd_diff(a):
           f"max raise {r.max_raise:+.3f} m, max drop {r.max_drop:+.3f} m")
 
 
+def cmd_isopach(a):
+    from . import isopach
+    ini = read_surface(a.initial, a.surface)
+    fin = read_surface(a.final, a.surface_final or a.surface)
+    pg = io.read_boundary(a.boundary) if a.boundary else None
+    r = isopach.isopach((ini.points, ini.faces), (fin.points, fin.faces), pg, interval=a.interval,
+                        origin=a.origin, zero_lines=bool(a.zero_dxf))
+    print(f"Initial '{ini.name}'  ->  final '{fin.name}'" + (f", inside {os.path.basename(a.boundary)}" if pg is not None else ""))
+    print(f"  Material excavated (cut)  {r.cut:12,.1f} m3     area {r.area_cut:10,.1f} m2   max depth {r.max_cut:7.3f} m")
+    print(f"  Material placed (fill)    {r.fill:12,.1f} m3     area {r.area_fill:10,.1f} m2   max depth {r.max_fill:7.3f} m")
+    print(f"  Difference (cut - fill)   {r.net:12,.1f} m3     zero area {r.area_zero:,.1f} m2")
+    print(f"  Compared (both surfaces)  {r.area_compared:12,.1f} m2" +
+          (f" of {r.area_boundary:,.1f} m2 inside the boundary" if pg is not None else ""))
+    if r.bins:
+        print("  Elevation range            cut m3     fill m3")
+        for z1, z2, c, f in r.bins:
+            print(f"  {z1:8.3f} > {z2:8.3f}  {c:11,.1f} {f:11,.1f}")
+    if a.zero_dxf:
+        lines = isopach.join_segments(r.zero_lines)
+        io.write_dxf_polylines(a.zero_dxf, lines, layer="ZERO CUT-FILL", closed=False)
+        print(f"  cut/fill zero line: {len(lines)} polylines -> {a.zero_dxf}")
+
+
 def cmd_drone(a):
     from . import drone
     s = _surface(a)
@@ -301,6 +325,13 @@ def main(argv=None):
     sp = sub.add_parser("diff"); sp.set_defaults(fn=cmd_diff); sp.add_argument("new"); sp.add_argument("old")
     sp.add_argument("--surface"); sp.add_argument("--surface-old"); sp.add_argument("--boundary")
     sp.add_argument("--step", type=float, default=0.25)
+    sp = sub.add_parser("isopach", help="exact cut/fill volumes between two surfaces (TBC earthwork report)")
+    sp.set_defaults(fn=cmd_isopach)
+    sp.add_argument("initial", help="initial / work-in-progress surface, e.g. OG"); sp.add_argument("final", help="final / as-built surface")
+    sp.add_argument("--surface"); sp.add_argument("--surface-final"); sp.add_argument("--boundary", help="DXF boundary polygon")
+    sp.add_argument("--interval", type=float, help="elevation range size for volumes by range (m)")
+    sp.add_argument("--origin", type=float, default=0.0, help="range limits are origin + k * interval")
+    sp.add_argument("--zero-dxf", help="write the cut/fill zero line to this DXF")
     sp = p("drone", cmd_drone); sp.add_argument("out_dir")
     sp.add_argument("--laz", nargs="+", required=True, help="drone flights (LAS/LAZ, wildcards ok), 2 or more")
     sp.add_argument("--boundary", help="DXF: patch only inside this polygon")
