@@ -21,6 +21,8 @@ python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary 
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
 python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
+python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]        3-page TIN-to-TIN volume report PDFs
+                                                    (existing PDFs are kept unless --overwrite)
 ```
 
 - `cut --csv` removes the vertices that match a shot within 6 mm in 3D (`--tol`). The faces that used them are
@@ -56,6 +58,91 @@ python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name S
     rebuild with `python -m sheetwrap build`) and `STEM C-F MAP - TB.pdf`.
   - **Config:** keys are listed in `surfpatch/cfmap.py`.
   - **Sign:** distances.csv `dist` is + for rock inside the design (cut). The sheet shows TBC's C (cut) / F (fill).
+- `volreport` builds 3-page TIN-to-TIN volume report PDFs from a JSON job file (depression reports or
+  surface-to-surface reports along a RoadXML `.rxl` corridor):
+  - **Page 1:** summary (stations, placement survey dates, bottom/top descriptions with `YY-DDD` converted to readable
+    dates, exact isopach fill/cut/area/max fill depth, optional slope-length deduction, `NET FILL`, field data table,
+    and an alignment locator map over an optional orthophoto).
+  - **Page 2:** plan view of fill depth over the orthophoto with TIN edges, red boundary, station ticks, section line
+    A-A, scale bar, north arrow, and colorbar.
+  - **Page 3:** true-scale cross-section A-A at the top-surface shot line nearest mid-report (preferring lines with
+    cut <= 5% of fill), showing this report's fill (and any cut), earlier placements down to a configurable base line,
+    and optional design template shapes (`box`, `circles`).
+  - **Header/footer:** optional vector logo (SVG/PDF, `${ENV}` expanded and skipped quietly if missing) top right,
+    plus output path, timestamp, user, project name, and `Page i of N` on every page. If the target PDF is open in a
+    viewer, writes `<name> Volume Report (NEW).pdf` beside it.
+
+### `volreport` job-file schema
+
+Relative paths resolve against the JSON file's directory. Example (synthetic local coordinates):
+
+```json
+{
+  "alignment": "trench.rxl",
+  "year": 2026,
+  "out_dir": "reports",
+  "project": "0000 - UTILITY TRENCH",
+  "title": "Volume Report",
+  "subtitle": "Utility Trench - Section 1",
+  "crs_note": "LOCAL GRID",
+  "logo": "${COMPANY_LOGO}",
+  "base_label": "trench bottom",
+  "ortho": {
+    "image": "ortho.jpg",
+    "cache": "ortho_crop.jpg",
+    "date": "Oct 30 2026",
+    "downsample": 2
+  },
+  "footer_note": "Stations on alignment {alignment}.  Volumes TIN to TIN (isopach).  Orthophoto {ortho_date}.",
+  "field": {
+    "glob": "field/*/CREW/{yy}-{doy:03d}-*{filter}*.csv",
+    "filename_date": "(?P<yy>\\d\\d)-(?P<doy>\\d{3})-",
+    "exclude": ["ORIG", "UTIL", "ASBUILT"],
+    "filter": "TRENCH",
+    "max_offset": 5.0
+  },
+  "design": [
+    {"from": 0, "to": 50, "shape": "circles", "d": 0.1143, "x": [-0.2, 0.0, 0.2], "z": [0.14285, -0.05715], "label": "ducts (design)"},
+    {"from": 50, "shape": "box", "w": 0.77, "h": 0.57, "top": 0.0, "label": "concrete encasement (design)"},
+    {"from": 50, "shape": "circles", "d": 0.1143, "x": [-0.2, 0.0, 0.2], "z": [-0.185, -0.385], "label": "ducts (design)"}
+  ],
+  "reports": [
+    {
+      "name": "26-299 TRENCH LIFT1",
+      "kind": "depression",
+      "bottom_csv": "26-299 TRENCH LIFT1.csv",
+      "boundary_dxf": "26-299 TRENCH LIFT1 BOUNDARY.dxf",
+      "top_csv": "26-299 TRENCH LIFT1 TOP.csv",
+      "bottom_desc": "Trench bottom",
+      "top_desc": "26-299 FILL LIFT1",
+      "sources": {"bottom": [[290, "BOT"]], "top": [[299, "LIFT1"]]},
+      "base": "self",
+      "deduction": {
+        "label": "DUCT VOL",
+        "area_m2": 0.01026,
+        "count": 6,
+        "stations": [10.0, 30.0]
+      }
+    },
+    {
+      "name": "26-301 LIFT2",
+      "kind": "surf2surf",
+      "bottom_specs": [[299, "LIFT1"]],
+      "top_specs": [[301, "LIFT2"]],
+      "stations": [10.0, 30.0],
+      "bottom_desc": "26-299 FILL LIFT1",
+      "top_desc": "26-301 FILL LIFT2",
+      "sources": {"bottom": [[299, "LIFT1"]], "top": [[301, "LIFT2"]]},
+      "base": [{"report": "26-299 TRENCH LIFT1"}]
+    }
+  ]
+}
+```
+
+- `kind = "depression"`: constrained TIN of `bottom_csv` with rings from `boundary_dxf` vs `top_csv` + rim ring (or lid of the rim ring alone when `top_csv` is omitted).
+- `kind = "surf2surf"`: plain Delaunay TINs from `bottom_specs`/`top_specs` (or `bottom_csv`/`top_csv` or `bottom_xml`/`top_xml`), clipped to `boundary_dxf` or the overlap of both convex hulls inside `stations`.
+- `base`: `"self"`, or a preference-ordered list of `{"report": name}`, `{"depression": stem}`, `{"field": [day, code]}`, or `{"xml": path}`.
+- `deduction`: `count * area_m2 * slope_length` over `stations` along the corridor profile; optional `"format"` string customises the stamp text (`{label}`, `{count}`, `{area_m2}`, `{slope}`, `{volume}`).
 
 Checked on real data: `cut` on a 14,000-point original-ground surface, using three CSVs of wrongly included
 post-excavation shots, reproduced a hand-built repair exactly. It had the same points and faces and zero volume
@@ -93,9 +180,11 @@ r.points, r.faces, r.stats                                      # patch TIN + ar
 `mesh.PatchError` is raised instead of returning a bad TIN.
 
 ```python
-from surfpatch import cc, cfmap
-d = cc.c2m(points_enz, V_enz, F)            # signed cloud-to-mesh via CloudCompare -SILENT (+ = normal side)
+from surfpatch import cc, cfmap, tinbuild, fielddata, volreport
+d = cc.c2m(points_enz, V_enz, F)                        # signed cloud-to-mesh via CloudCompare -SILENT (+ = normal side)
 r = cfmap.run("site_cfmap.json", ["scan.csv"], "out")   # same as the cfmap command; returns paths + stats
+bot, lid = tinbuild.depression(P_bot, [rim, bring], rim)
+res = volreport.run("job.json", out_dir="out")          # 3-page volume report PDFs; returns per-report metrics
 ```
 
 `cc` finds CloudCompare from `$CLOUDCOMPARE_EXE` or `C:\Projects\cloudcompare\CloudCompare_*_bin_x64`. It shifts
