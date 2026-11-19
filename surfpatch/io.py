@@ -1,8 +1,10 @@
-"""File helpers: survey CSVs, DXF boundaries and meshes, TBC source-data-only LandXML, LAS/LAZ clipping.
+"""File helpers: survey CSVs, DXF boundaries and meshes, TBC source-data-only LandXML, LAS/LAZ clipping, orthophotos.
 
 LandXML TIN read/write itself is rxlkit.landxml (Surface: points north, east, z).
 """
 import csv
+import json
+import math
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -160,6 +162,77 @@ def read_boundary(path):
     return max(polys, key=polygon_area)
 
 
+def _read_polylines_3d_raw(path):
+    """Plain group-code reader for 2D/3D (LW)POLYLINEs with layer and Z, returning [(layer, (k, 3) n/e/z)]."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = [ln.strip() for ln in fh]
+    out, cur, layer, ent, v, lw_z = [], None, "0", None, None, 0.0
+    for code, val in zip(lines[0::2], lines[1::2]):
+        if code == "0":
+            if v is not None and cur is not None:
+                cur.append([v[1], v[0], v[2]])
+            v = None
+            if val in ("POLYLINE", "LWPOLYLINE"):
+                if cur is not None and len(cur) >= 2:
+                    out.append((layer, np.array(cur, float)))
+                cur, layer, lw_z = [], "0", 0.0
+            elif val == "VERTEX" and cur is not None:
+                v = [0.0, 0.0, 0.0]
+            elif val == "SEQEND":
+                if cur is not None and len(cur) >= 2:
+                    out.append((layer, np.array(cur, float)))
+                cur = None
+            elif cur is not None and ent == "LWPOLYLINE":
+                if len(cur) >= 2:
+                    out.append((layer, np.array(cur, float)))
+                cur = None
+            ent = val
+        elif cur is not None and ent == "POLYLINE" and code == "8":
+            layer = val
+        elif cur is not None and ent == "LWPOLYLINE":
+            if code == "8":
+                layer = val
+            elif code == "38":
+                lw_z = float(val)
+            elif code == "10":
+                v = [float(val), 0.0, lw_z]
+            elif code == "20" and v is not None:
+                v[1] = float(val)
+                cur.append([v[1], v[0], v[2]])
+                v = None
+        elif v is not None and ent == "VERTEX" and code in ("10", "20", "30"):
+            v[("10", "20", "30").index(code)] = float(val)
+    if v is not None and cur is not None:
+        cur.append([v[1], v[0], v[2]])
+    if cur is not None and len(cur) >= 2:
+        out.append((layer, np.array(cur, float)))
+    return out
+
+
+def read_polylines_3d(path):
+    """2D/3D polylines with >= 2 vertices from a DXF, as [(layer, (k, 3) array of (north, east, z))]."""
+    from ezdxf import recover
+    from ezdxf.lldxf.const import DXFError
+    try:
+        doc, _ = recover.readfile(str(path))
+    except DXFError:
+        return _read_polylines_3d_raw(path)
+    out = []
+    for ent in doc.modelspace():
+        t = ent.dxftype()
+        layer = ent.dxf.get("layer", "0")
+        if t == "LWPOLYLINE":
+            z = float(ent.dxf.get("elevation", 0.0))
+            pts = np.array([(p[1], p[0], z) for p in ent.get_points("xy")], float)
+        elif t == "POLYLINE" and not (ent.is_poly_face_mesh or ent.is_polygon_mesh):
+            pts = np.array([(v.dxf.location.y, v.dxf.location.x, v.dxf.location.z) for v in ent.vertices], float)
+        else:
+            continue
+        if len(pts) >= 2:
+            out.append((layer, pts))
+    return out
+
+
 def _layer(name):
     return re.sub(r"[^A-Za-z0-9_$-]+", "_", name).strip("_")[:31] or "MESH"
 
@@ -297,3 +370,60 @@ def clip_las(path, bbox, chunk=5_000_000, allow_download=False):
     if not X:
         return None
     return tuple(np.concatenate(a) for a in (X, Y, Z, C))
+
+
+# ---------------------------------------------------------------- orthophotos
+
+def _world_file(image_path):
+    stem = os.path.splitext(str(image_path))[0]
+    for ext in (".jgw", ".jgwx", ".wld", ".tfw", ".pgw"):
+        p = stem + ext
+        if os.path.isfile(p):
+            return p
+    raise FileNotFoundError(f"no world file (.jgw/.wld/.tfw/.pgw) beside {image_path}")
+
+
+def ortho_crop(image, bbox_en, cache=None, downsample=2):
+    """Crop a georeferenced orthophoto (with a world file beside it) to `bbox_en = (emin, nmin, emax, nmax)`.
+
+    Uses PIL draft mode so gigapixel JPEGs are not decoded at full resolution. When `cache` is given, saves the
+    cropped image and `<cache>.json` extent and reuses them on later calls.
+    Returns `(PIL.Image, (e0, e1, n0, n1))` where the tuple is matplotlib `imshow` extent order.
+    """
+    from PIL import Image
+    cache_str = str(cache) if cache else None
+    if cache_str and os.path.isfile(cache_str) and os.path.isfile(cache_str + ".json"):
+        with open(cache_str + ".json", encoding="utf-8") as fh:
+            ext = tuple(json.load(fh))
+        return Image.open(cache_str), ext
+    wf = _world_file(image)
+    with open(wf, encoding="utf-8") as fh:
+        A, D, B, E, X0, Y0 = [float(x) for x in fh.read().split()[:6]]
+    if abs(D) > 1e-9 or abs(B) > 1e-9:
+        raise ValueError(f"{wf}: rotated world files are not supported (D={D}, B={B})")
+    e0, n0, e1, n1 = [float(v) for v in bbox_en]
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(image) as im:
+        W, H = im.size
+        if downsample and downsample > 1:
+            im.draft("RGB", (max(1, W // downsample), max(1, H // downsample)))
+        k = W / im.size[0]
+        px, py = A * k, E * k
+        # World file (X0, Y0) is the centre of original pixel (0, 0); its outer corner is half an original pixel out.
+        e_edge, n_edge = X0 - A / 2.0, Y0 - E / 2.0
+        c0 = max(0, int(math.floor((e0 - e_edge) / px)))
+        c1 = min(im.size[0], int(math.ceil((e1 - e_edge) / px)))
+        r0 = max(0, int(math.floor((n1 - n_edge) / py)))
+        r1 = min(im.size[1], int(math.ceil((n0 - n_edge) / py)))
+        if c1 <= c0 or r1 <= r0:
+            raise ValueError(f"bbox {bbox_en} does not overlap orthophoto {image}")
+        crop = im.crop((c0, r0, c1, r1)).convert("RGB")
+    ext = (e_edge + c0 * px, e_edge + c1 * px, n_edge + r1 * py, n_edge + r0 * py)
+    if cache_str:
+        parent = os.path.dirname(cache_str)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        crop.save(cache_str, quality=90)
+        with open(cache_str + ".json", "w", encoding="utf-8") as fh:
+            json.dump(list(ext), fh)
+    return crop, ext

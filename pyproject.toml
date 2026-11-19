@@ -8,9 +8,12 @@ dependencies = [
     "rxlkit",          # sibling repo ../rxlkit (LandXML read/write, TIN checks)
     "numpy>=1.24",
     "scipy",
+    "shapely",
     "triangle",
     "matplotlib",
     "ezdxf",
+    "pillow",
+    "pymupdf",
 ]
 license = { text = "MIT" }
 authors = [{ name = "Lance Colton" }]

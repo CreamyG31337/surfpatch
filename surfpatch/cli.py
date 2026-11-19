@@ -12,6 +12,7 @@
   todxf    XML...                          LandXML TIN -> DXF polyface mesh
   rebuild-source XML OUT                   TBC source-data-only export -> TIN
   cfmap    CONFIG SCAN... --out DIR        cut/fill map sheets of scanned walls vs a design corridor (.rxl)
+  volreport JOB.json [NAME...] [--out DIR] TIN-to-TIN volume report PDFs (summary, plan, cross-section)
 
 CSV arguments accept wildcards. Surfaces are read/written with rxlkit.landxml; every written TIN passes
 rxlkit.tin.quality_ok and an area check.
@@ -285,6 +286,18 @@ def cmd_cfmap(a):
     print(f"wrote {r['views']}\n      {r['job']}" + (f"\n      {r['sheet']}" if r["sheet"] else ""))
 
 
+def cmd_volreport(a):
+    from . import volreport
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    results = volreport.run(a.job, names=a.names or None, out_dir=a.out)
+    for r in results:
+        extra = f"  [{r['deduction_text']}]" if r["deduction_text"] else ""
+        print(f"{r['name']}: fill {r['fill']:.1f}  cut {r['cut']:.1f}  "
+              f"area {r['area_compared']:.1f}/{r['area_boundary']:.1f} m2  "
+              f"max fill {r['max_fill']:.2f}  net {r['net']:.1f}{extra}")
+
+
 def fmt(s):
     from .cfmap import fmt_sta
     return fmt_sta(s)
@@ -357,6 +370,12 @@ def main(argv=None):
     sp.add_argument("--engine", choices=["auto", "cloudcompare", "section"])
     sp.add_argument("--no-sheet", action="store_true", help="map views + sheetwrap job only")
     sp.add_argument("--download", action="store_true", help="allow reading OneDrive online-only LAZ")
+
+    sp = sub.add_parser("volreport", help="TIN-to-TIN volume report PDFs from a JSON job file")
+    sp.set_defaults(fn=cmd_volreport)
+    sp.add_argument("job", help="JSON job file (see surfpatch.volreport)")
+    sp.add_argument("names", nargs="*", help="report names to build (default: all in job)")
+    sp.add_argument("--out", help="output folder (overrides out_dir in job JSON)")
 
     a = ap.parse_args(argv)
     try:
