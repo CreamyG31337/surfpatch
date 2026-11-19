@@ -30,12 +30,17 @@ def fmt_sta(s, dec=1):
     return f"{sign}{km}+{rem:0{4 + dec}.{dec}f}"
 
 
-def _resolve_path(val, base_dir):
-    """Expand env vars and resolve relative to `base_dir`. Returns None if empty or env var undefined."""
+def _resolve_path(val, base_dir, required=None):
+    """Expand env vars and resolve relative to `base_dir`. Returns None if empty or an env var is undefined,
+    unless `required` (the job-file key, for the message) is given: then that is a ValueError."""
     if not val:
+        if required:
+            raise ValueError(f"job file: '{required}' is missing")
         return None
     s = os.path.expandvars(str(val))
     if "$" in s or "%" in s:
+        if required:
+            raise ValueError(f"job file: '{required}' = {val!r} uses an environment variable that is not set")
         return None
     p = Path(s)
     if not p.is_absolute() and base_dir is not None:
@@ -535,7 +540,7 @@ def build_report(job, rep, corridor, out_dir, field=None, ortho_loader=None, sur
         net -= dv
 
     out = _open_output_path(out_dir, name)
-    rxl_stem = os.path.splitext(os.path.basename(_resolve_path(job["alignment"], base_dir)))[0]
+    rxl_stem = os.path.splitext(os.path.basename(_resolve_path(job.get("alignment"), base_dir, "alignment")))[0]
     ortho_date = (job.get("ortho") or {}).get("date", "")
     title = job.get("title", "Volume Report")
     subtitle = job.get("subtitle", "")
@@ -619,19 +624,15 @@ def build_report(job, rep, corridor, out_dir, field=None, ortho_loader=None, sur
     }
 
 
-def run(job_path_or_dict, names=None, out_dir=None):
+def run(job_path_or_dict, names=None, out_dir=None, overwrite=False):
     """Run all reports (or those named in `names`) from a volume-report job JSON/dict.
 
+    Existing report PDFs are never replaced unless `overwrite`: the job's `out_dir` is often the folder of reports
+    already sent, so a trial run goes to `out_dir=` somewhere else. Checked for all reports before any is built.
     Returns a list of per-report result dicts.
     """
     job = load_job(job_path_or_dict)
     base_dir = job["_base"]
-    rxl_path = _resolve_path(job["alignment"], base_dir)
-    corridor = Corridor.load(rxl_path)
-    year = int(job.get("year", datetime.date.today().year))
-    field = fielddata.FieldData(job["field"], year, base_dir=base_dir) if job.get("field") else None
-
-    target_dir = str(out_dir) if out_dir is not None else _resolve_path(job.get("out_dir", "."), base_dir)
     reports = job.get("reports", [])
     report_map = {r["name"]: r for r in reports}
     if names:
@@ -641,6 +642,18 @@ def run(job_path_or_dict, names=None, out_dir=None):
         todo = [report_map[n] for n in names]
     else:
         todo = reports
+
+    target_dir = str(out_dir) if out_dir is not None else _resolve_path(job.get("out_dir", "."), base_dir, "out_dir")
+    existing = [r["name"] for r in todo
+                if os.path.exists(os.path.join(target_dir, f"{r['name']} Volume Report.pdf"))]
+    if existing and not overwrite:
+        raise FileExistsError(f"{len(existing)} report PDF(s) already in {target_dir}: {existing}. "
+                              "Use --overwrite (overwrite=True) to replace them, or --out to write elsewhere.")
+
+    rxl_path = _resolve_path(job.get("alignment"), base_dir, "alignment")
+    corridor = Corridor.load(rxl_path)
+    year = int(job.get("year", datetime.date.today().year))
+    field = fielddata.FieldData(job["field"], year, base_dir=base_dir) if job.get("field") else None
 
     ortho_loader = _make_ortho_loader(job, corridor)
     surface_cache = {}

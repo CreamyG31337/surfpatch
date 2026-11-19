@@ -21,7 +21,8 @@ python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary 
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
 python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
-python -m surfpatch volreport JOB.json [NAME...] [--out DIR]                      3-page TIN-to-TIN volume report PDFs
+python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]        3-page TIN-to-TIN volume report PDFs
+                                                    (existing PDFs are kept unless --overwrite)
 ```
 
 - `cut --csv` removes the vertices that match a shot within 6 mm in 3D (`--tol`). The faces that used them are

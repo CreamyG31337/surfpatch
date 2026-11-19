@@ -258,3 +258,25 @@ def test_end_to_end_with_svg_logo_and_cli(tmp_path, capsys):
         assert len(doc[0].get_xobjects()) >= 1
     finally:
         doc.close()
+
+
+def test_existing_pdfs_kept_unless_overwrite(tmp_path):
+    job_path = _build_synthetic_job(tmp_path, logo_value="")
+    out_dir = tmp_path / "sent"
+    volreport.run(job_path, names=["26-301 LIFT2"], out_dir=out_dir)
+    pdf = out_dir / "26-301 LIFT2 Volume Report.pdf"
+    before = pdf.read_bytes()
+    with pytest.raises(FileExistsError, match="26-301 LIFT2"):
+        volreport.run(job_path, out_dir=out_dir)        # checked before anything is built
+    assert pdf.read_bytes() == before
+    assert sorted(p.name for p in out_dir.iterdir()) == [pdf.name]
+    pdf.write_bytes(b"old report")
+    volreport.run(job_path, names=["26-301 LIFT2"], out_dir=out_dir, overwrite=True)
+    assert pdf.read_bytes().startswith(b"%PDF")
+
+
+def test_required_path_with_unset_env_var_is_clear(tmp_path):
+    job = volreport.load_job(_build_synthetic_job(tmp_path, logo_value=""))
+    job["alignment"] = "${NONEXISTENT_VOLREPORT_RXL}/cl.rxl"
+    with pytest.raises(ValueError, match="'alignment'.*not set"):
+        volreport.run(job, out_dir=tmp_path / "x")

@@ -37,11 +37,17 @@ def nice_date(d, year=True):
 
 
 def readable(text, year=None):
-    """Rewrite YY-DDD day-of-year tokens in `text` (e.g. '26-292') as 'Oct 19'."""
+    """Rewrite YY-DDD day-of-year tokens in `text` (e.g. '26-292') as 'Oct 19'.
+
+    With `year`, only tokens from that year or the one either side are rewritten (so an unrelated 'NN-NNN' in a
+    description is left alone); without it, any YY-DDD with a valid day is.
+    """
     century = (int(year) // 100) * 100 if year is not None else 2000
 
     def _sub(m):
         y = century + int(m.group(1))
+        if year is not None and abs(y - int(year)) > 1:
+            return m.group(0)
         doy = int(m.group(2))
         max_doy = 366 if calendar.isleap(y) else 365
         if doy < 1 or doy > max_doy:

@@ -290,7 +290,7 @@ def cmd_volreport(a):
     from . import volreport
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    results = volreport.run(a.job, names=a.names or None, out_dir=a.out)
+    results = volreport.run(a.job, names=a.names or None, out_dir=a.out, overwrite=a.overwrite)
     for r in results:
         extra = f"  [{r['deduction_text']}]" if r["deduction_text"] else ""
         print(f"{r['name']}: fill {r['fill']:.1f}  cut {r['cut']:.1f}  "
@@ -376,6 +376,7 @@ def main(argv=None):
     sp.add_argument("job", help="JSON job file (see surfpatch.volreport)")
     sp.add_argument("names", nargs="*", help="report names to build (default: all in job)")
     sp.add_argument("--out", help="output folder (overrides out_dir in job JSON)")
+    sp.add_argument("--overwrite", action="store_true", help="replace report PDFs that already exist")
 
     a = ap.parse_args(argv)
     try:

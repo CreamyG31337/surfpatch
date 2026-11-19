@@ -31,6 +31,8 @@ def test_readable_descriptions_and_year_boundaries():
     assert fielddata.readable("24-060 / 24-366", 2024) == "Feb 29 / Dec 31"
     # Invalid day 366 in a non-leap year is left untouched
     assert fielddata.readable("26-366 stays", 2026) == "26-366 stays"
+    # Tokens far from the job year are not day numbers (e.g. a part or drawing number)
+    assert fielddata.readable("PIPE 10-200 on 26-292", 2026) == "PIPE 10-200 on Oct 19"
 
 
 def test_date_from_filename():
