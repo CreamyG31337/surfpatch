@@ -10,7 +10,8 @@
   isopach  INITIAL FINAL [--boundary DXF]  exact cut/fill, areas, volumes by elevation range (like TBC's report)
   drone    XML OUT_DIR --laz F...          patch where 2 drone flights agree the ground is lower
   todxf    XML...                          LandXML TIN -> DXF polyface mesh
-  rebuild-source XML OUT                   TBC source-data-only export -> TIN
+  rebuild-source XML OUT                   TBC source-data-only export -> TIN (clipped to its Boundary)
+  mtx-to-xyz MTX [OUT]                     HYPACK sparse matrix (.MTX) bathymetry -> E N Z .xyz
   cfmap    CONFIG SCAN... --out DIR        cut/fill map sheets of scanned walls vs a design corridor (.rxl)
   volreport JOB.json [NAME...] [--out DIR] TIN-to-TIN volume report PDFs (summary, plan, cross-section)
 
@@ -271,6 +272,14 @@ def cmd_rebuild_source(a):
     print("wrote", a.out)
 
 
+def cmd_mtx_to_xyz(a):
+    P = io.read_mtx(a.mtx)
+    out = a.out or os.path.splitext(a.mtx)[0] + " (from MTX).xyz"
+    io.write_xyz(out, P)
+    print(f"{len(P):,} points  E {P[:, 1].min():.2f} to {P[:, 1].max():.2f}  N {P[:, 0].min():.2f} to "
+          f"{P[:, 0].max():.2f}  EL {P[:, 2].min():.2f} to {P[:, 2].max():.2f}\nwrote {out}")
+
+
 def cmd_cfmap(a):
     from . import cfmap
     cfg = cfmap.load_config(a.config)
@@ -359,7 +368,10 @@ def main(argv=None):
     sp = sub.add_parser("todxf"); sp.set_defaults(fn=cmd_todxf); sp.add_argument("xml", nargs="+"); sp.add_argument("--out")
     sp = sub.add_parser("rebuild-source"); sp.set_defaults(fn=cmd_rebuild_source); sp.add_argument("xml"); sp.add_argument("out")
     sp.add_argument("--bbox", type=float, nargs=4, metavar=("EMIN", "NMIN", "EMAX", "NMAX"))
-    sp.add_argument("--max-edge", type=float, default=15.0); sp.add_argument("--name")
+    sp.add_argument("--max-edge", type=float, default=15.0, help="used only when the export has no Boundary")
+    sp.add_argument("--name")
+    sp = sub.add_parser("mtx-to-xyz"); sp.set_defaults(fn=cmd_mtx_to_xyz); sp.add_argument("mtx")
+    sp.add_argument("out", nargs="?", help="default: '<mtx name> (from MTX).xyz' beside it")
 
     sp = sub.add_parser("cfmap"); sp.set_defaults(fn=cmd_cfmap)
     sp.add_argument("config", help="JSON config (see surfpatch.cfmap)")

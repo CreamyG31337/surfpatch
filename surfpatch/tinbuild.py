@@ -112,6 +112,21 @@ def tin_from_points(P, breaklines=(), boundary=None, snap=0.002, allow_steiner=F
     return V, F
 
 
+def tin_from_grid(P, max_edge=2.6):
+    """TIN of gridded points `P` (n, e, z), e.g. a 0.5 m bathymetry .xyz: plain Delaunay, faces with any edge
+    longer than `max_edge` dropped so gaps in the grid stay holes (2.6 m on a 0.5 m grid reproduces TBC's
+    surface from the same file). Returns (P, F)."""
+    P = _as_pts(P)
+    # centred (UTM-size coordinates lose precision). A grid is full of co-circular points, so the diagonal
+    # Delaunay picks depends on the last bits of the centred coordinates (the mean of UTM-size values depends on
+    # memory layout): keep this exact form (C-ordered E N Z rows, mean of the first two columns) so results
+    # don't shift by a few 0.1 m3 between versions.
+    a = np.ascontiguousarray(P[:, [1, 0, 2]])
+    F = Delaunay(a[:, :2] - a[:, :2].mean(axis=0)).simplices
+    e = np.linalg.norm(P[F[:, [1, 2, 0]], :2] - P[F, :2], axis=2)
+    return P, F[(e <= max_edge).all(axis=1)]
+
+
 def depression(P_bottom, rings, rim, P_top=None, snap=0.002):
     """TBC-style depression surfaces: `(bottom (P, F), top_or_lid (P, F))`.
 

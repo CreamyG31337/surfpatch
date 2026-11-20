@@ -150,6 +150,58 @@ def test_rebuild_source_only(tmp_path):
     assert quality_ok(quality(s.points, s.faces))
 
 
+def _pl(pts):
+    return "<PntList3D>" + " ".join(f"{N0 + n:.4f} {E0 + e:.4f} {200 + 0.1 * e + 0.05 * n:.4f}" for e, n in pts) + "</PntList3D>"
+
+
+def test_rebuild_source_crossing_breaklines_long_edges_and_boundary(tmp_path):
+    # a 40 x 40 m designed plane (edges far over max_edge) with two crossing diagonals, an outer boundary and a
+    # 4 x 4 m void: the crossing gets a point on the plane, the surface is exactly the boundary minus the void
+    sq = [(0, 0), (40, 0), (40, 40), (0, 40), (0, 0)]
+    void = [(2, 2), (6, 2), (6, 6), (2, 6), (2, 2)]
+    bl = "".join(f"<Breakline>{_pl(p)}</Breakline>" for p in ([(0, 0), (40, 40)], [(40, 0), (0, 40)]))
+    (tmp_path / "s.xml").write_text(
+        '<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.2"><Surfaces><Surface name="PAD"><SourceData>'
+        f"<Breaklines>{bl}</Breaklines><Boundaries>"
+        f'<Boundary bndType="outer" name="Outer">{_pl(sq)}</Boundary>'
+        f'<Boundary bndType="void" name="Hole">{_pl(void)}</Boundary>'
+        "</Boundaries></SourceData></Surface></Surfaces></LandXML>")
+    s = io.read_source_only(tmp_path / "s.xml")
+    P, F = np.asarray(s.points), np.asarray(s.faces)
+    assert area(P, F) == pytest.approx(1600 - 16)
+    assert quality_ok(quality(P, F))
+    used = np.unique(F)
+    e, n = P[used, 1] - E0, P[used, 0] - N0
+    assert P[used, 2] == pytest.approx(200 + 0.1 * e + 0.05 * n, abs=1e-4)
+    assert ((np.abs(e - 20) < 1e-6) & (np.abs(n - 20) < 1e-6)).any()      # point added at the crossing
+
+
+@pytest.mark.parametrize("ang", [0.0, 90.0])
+def test_read_mtx(tmp_path, ang):
+    # 4 x 3 cells of 0.5 m; cells 0, 5 and 11 have depths. Rotation is clockwise about the origin.
+    hdr = [E0, N0, 2.0, 1.5, 0.5, 0.5, ang, 0]
+    (tmp_path / "g.MTX").write_text("\n".join(map(str, hdr)) + "\n0 190.5\n5 191.25\n11 192.0\n")
+    P = io.read_mtx(tmp_path / "g.MTX")
+    uv = np.array([(0.25, 0.25), (0.75, 0.75), (1.75, 1.25)])       # cell centres along local x / y
+    if ang == 90.0:                                                 # local x points south, local y east
+        en = np.column_stack([E0 + uv[:, 1], N0 - uv[:, 0]])
+    else:
+        en = np.column_stack([E0 + uv[:, 0], N0 + uv[:, 1]])
+    assert P[:, [1, 0]] == pytest.approx(en) and P[:, 2].tolist() == [190.5, 191.25, 192.0]
+    io.write_xyz(tmp_path / "g.xyz", P)
+    assert io.read_xyz(tmp_path / "g.xyz") == pytest.approx(P[np.lexsort((P[:, 0], P[:, 1]))])
+
+
+def test_read_xyz_commas_and_tin_from_grid_keeps_gaps(tmp_path):
+    from surfpatch.tinbuild import tin_from_grid
+    pts = [(E0 + i * 0.5, N0 + j * 0.5, 190.0) for i in range(20) for j in range(20) if not 8 <= i <= 13]
+    (tmp_path / "g.xyz").write_text("\n".join(f"{e},{n},{z}" for e, n, z in pts + pts[:3]) + "\n")
+    P = io.read_xyz(tmp_path / "g.xyz")
+    assert len(P) == len(pts)                                       # duplicate rows removed
+    P, F = tin_from_grid(P, max_edge=2.6)
+    assert area(P, F) == pytest.approx((3.5 + 2.5) * 9.5)           # strips 0-3.5 and 7-9.5 m; the gap stays a hole
+
+
 def test_cli_cut_boundary(tmp_path):
     P, F = grid_tin()
     write_surfaces(tmp_path / "in.xml", [Surface("OG", P, F)])
