@@ -20,6 +20,7 @@ python -m surfpatch isopach  OG.xml ASBUILT.xml [--boundary AREA.dxf] [--interva
 python -m surfpatch drone    SURF.xml OUT_DIR --laz "flights\*.laz" [--boundary AREA.dxf] [--check TLS.laz]
 python -m surfpatch todxf    SURF.xml [...]                                       R12 polyface mesh per surface
 python -m surfpatch rebuild-source EXPORT.xml OUT.xml [--bbox EMIN NMIN EMAX NMAX]
+python -m surfpatch mtx-to-xyz GRID.MTX [OUT.xyz]                               HYPACK .MTX bathymetry -> E N Z .xyz
 python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
 python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]        3-page TIN-to-TIN volume report PDFs
                                                     (existing PDFs are kept unless --overwrite)
@@ -33,7 +34,15 @@ python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]      
 - CSVs: a header row is used if present (Point/Northing/Easting/Elevation/Code or P/N/E/Z/D). Otherwise the
   columns are `--order PNEZD`.
 - `rebuild-source` turns a TBC "source data only" export (2-point breaklines = TIN edges, no faces) back into a
-  TIN. It streams the file, so 100+ MB exports are fine.
+  TIN. It streams the file, so 100+ MB exports are fine. Where breaklines cross, a point is added at the crossing
+  (elevation interpolated along the breaklines). If the export has a `<Boundary>` (outer / void), the TIN is clipped
+  to it, as TBC does; only without one are hull triangles with an edge over `--max-edge` (15 m) dropped. (Before
+  2026-11-20 it always used the 15 m limit, which removed the plateau of a designed pad, and fell back to a plain
+  Delaunay when breaklines crossed.)
+- `mtx-to-xyz` converts a HYPACK sparse ASCII matrix (.MTX: origin, size, cell size, clockwise rotation, then
+  `cell z` rows) to a space-delimited `E N Z` file, points at cell centres. Checked exact against paired
+  .MTX/.xyz deliveries. In Python: `io.read_mtx`, `io.read_xyz`, `io.write_xyz`, and `tinbuild.tin_from_grid`
+  (Delaunay, edges over 2.6 m dropped: matches TBC's TIN of a 0.5 m grid).
 - `drone` patches a surface that is out of date because the ground was dug lower after it was built. The flights
   are binned into 0.5 m cells (`--step`), taking each flight's median Z per cell. A cell's ground is the lowest
   value that a second flight confirms within 0.10 m (`--confirm`), so one bad or low flight is never used on its

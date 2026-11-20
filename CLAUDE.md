@@ -2,7 +2,8 @@
 
 Tool repo: check and repair LandXML TIN surfaces built from survey data. v0.1 (2026-11-11) has these CLI
 commands: `info`, `spikes`, `sparse`, `trace`, `cut`, `insert`, `diff`, `drone`, `todxf`, `rebuild-source`,
-`cfmap` (added 2026-11-13), `isopach` (added 2026-11-17), `volreport` (added 2026-11-19).
+`cfmap` (added 2026-11-13), `isopach` (added 2026-11-17), `volreport` (added 2026-11-19), `mtx-to-xyz`
+(added 2026-11-20).
 See README.md.
 
 - `surfpatch/mesh.py`: local re-triangulation core (`retriangulate`, `remove_vertices`, `insert_points`,
@@ -14,8 +15,12 @@ See README.md.
   constrained Delaunay only for pieces whose parents both cross it). Bins = overlap of [lower, upper] with each
   elevation range, integrated exactly as max(plane - c, 0) terms. CLI `isopach`. `join_segments` for the zero line.
 - `surfpatch/io.py`: `read_shots` (CSV), `read_boundary`/`read_polygons`/`read_polylines_3d` (ezdxf), `write_dxf_mesh`,
-  `read_source_only`, `clip_las`, `is_online_only`, `ortho_crop` (PIL draft-mode crop + world file + cache).
+  `read_source_only` (2026-11-20: Steiner points at crossing breaklines, clipped to the export's <Boundary>;
+  max_edge only without one), `read_mtx` / `read_xyz` / `write_xyz` (grid bathymetry), `clip_las`,
+  `is_online_only`, `ortho_crop` (PIL draft-mode crop + world file + cache).
 - `surfpatch/tinbuild.py` (2026-11-19): `tin_from_points` (constrained Delaunay with breaklines and optional boundary),
+  `tin_from_grid` (2026-11-20: Delaunay of a grid, long edges dropped; keep its centring exactly as is, grid
+  diagonals depend on the last bits),
   `depression` (TBC depression method: constrained bottom TIN + rim lid or top+rim TIN), `station_band`,
   `overlap_boundary` (surface-to-surface hull intersection clipped to a corridor band).
 - `surfpatch/fielddata.py` (2026-11-19): `FieldData` (config-driven glob/date/code lookup for survey CSVs),

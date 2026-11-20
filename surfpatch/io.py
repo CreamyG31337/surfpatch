@@ -287,10 +287,17 @@ def write_pnezd(path, points, code="", start=1):
 
 def read_source_only(path, bbox=None, max_edge=15.0, name=None):
     """Rebuild a TBC 'source data only' LandXML export (breaklines that are TIN edges, plus DataPoints, no faces)
-    as a Surface: constrained Delaunay of the edges, or plain Delaunay if edges cross. Streams the file, so
-    100+ MB exports are fine. bbox = (emin, nmin, emax, nmax) keeps only that window. Hull faces with an edge
-    longer than max_edge are dropped."""
+    as a Surface: constrained Delaunay of the breaklines. Where breaklines cross, a point is added at the crossing
+    with its elevation interpolated along the breaklines. Streams the file, so 100+ MB exports are fine.
+    bbox = (emin, nmin, emax, nmax) keeps only that window.
+
+    If the export has <Boundary> elements (and no bbox), faces outside the outer boundaries or inside void ones
+    are dropped and max_edge is not used (a designed pad or stockpile can have plateau edges far over 15 m).
+    Otherwise hull faces with an edge longer than max_edge are dropped."""
+    from .compare import inside
+    from .tinbuild import _steiner_z
     key, V, E = {}, [], set()
+    bnds, bnd_type = [], None          # [(bndType, (k, 2) east/north)]
 
     def vid(n, e, z):
         # snap to 0.1 mm, the precision LandXML is written at, so the TIN checked here is the one written
@@ -314,11 +321,18 @@ def read_source_only(path, bbox=None, max_edge=15.0, name=None):
                 in_dp += 1
             elif tag == "Surface" and sname is None:
                 sname = el.get("name")
+            elif tag == "Boundary":
+                bnd_type = (el.get("bndType") or "outer").lower()
             continue
         if tag == "DataPoints":
             in_dp -= 1
+        elif tag == "Boundary":
+            bnd_type = None
+            el.clear()
         elif tag == "PntList3D" and el.text:
             a = np.array(el.text.split(), float).reshape(-1, 3)   # N E Z
+            if bnd_type is not None:
+                bnds.append((bnd_type, a[:, [1, 0]]))
             k = keep(a)
             if in_dp:
                 for p in a[k]:
@@ -332,19 +346,75 @@ def read_source_only(path, bbox=None, max_edge=15.0, name=None):
     if len(V) < 3:
         raise ValueError(f"{path}: fewer than 3 points{' in bbox' if bbox else ''}")
     V = np.array(V, float)
-    xy = V[:, [1, 0]] - V[:, [1, 0]].mean(0)
+    off = V[:, [1, 0]].mean(0)
+    xy = V[:, [1, 0]] - off
     args = {"vertices": xy}
+    segs = np.array(sorted(E), int).reshape(-1, 2)
     if E:
-        args["segments"] = np.array(sorted(E))
+        args["segments"] = segs
     r = triangle.triangulate(args, "pcQ")
-    if len(r["vertices"]) != len(V):     # crossing edges (overlapping layers): plain Delaunay
-        r = triangle.triangulate({"vertices": xy}, "cQ")
     T = np.asarray(r["triangles"], int)
-    Pt = xy[T]
-    L = np.max(np.linalg.norm(Pt - np.roll(Pt, 1, axis=1), axis=2), axis=1)
-    T = T[L < max_edge]
+    rv = np.asarray(r["vertices"], float)
+    if len(rv) > len(V):                 # points added where breaklines cross
+        z = [_steiner_z(q, xy, V[:, 2], segs) for q in rv[len(V):]]
+        V = np.vstack([V, np.column_stack([rv[len(V):, 1] + off[1], rv[len(V):, 0] + off[0], z])])
+        xy = rv
+    if bnds and bbox is None:
+        c = V[T][:, :, [1, 0]].mean(axis=1)
+        keepf = np.zeros(len(T), bool)
+        for t, pg in bnds:
+            if t == "outer":
+                keepf |= inside(pg, c[:, 0], c[:, 1])
+        for t, pg in bnds:
+            if t == "void":
+                keepf &= ~inside(pg, c[:, 0], c[:, 1])
+        T = T[keepf]
+    else:
+        Pt = xy[T]
+        L = np.max(np.linalg.norm(Pt - np.roll(Pt, 1, axis=1), axis=2), axis=1)
+        T = T[L < max_edge]
     return Surface(name or sname or os.path.splitext(os.path.basename(path))[0], V, T,
                    "rebuilt from source-data-only export")
+
+
+# ---------------------------------------------------------------- grid files (bathymetry)
+
+def read_xyz(path):
+    """Points of a gridded `E N Z` text file (.xyz; space- or comma-separated, extra columns ignored) as
+    (north, east, z), exact duplicate rows removed."""
+    with open(path, encoding="latin1") as fh:
+        text = fh.read().replace(",", " ")
+    a = np.loadtxt(text.splitlines(), usecols=(0, 1, 2), ndmin=2)
+    a = np.unique(a, axis=0)
+    return a[:, [1, 0, 2]]
+
+
+def read_mtx(path):
+    """Points of a HYPACK sparse ASCII matrix (.MTX) grid as (north, east, z).
+
+    Header lines: origin E, origin N, grid width, grid height, cell size x, cell size y, rotation (degrees,
+    clockwise), mode flag; then `<cell index> <z>` rows. Cells are numbered row by row from the origin
+    (width / cell size per row); a point is at its cell centre, rotated clockwise about the origin."""
+    with open(path, encoding="latin1") as fh:
+        lines = fh.read().splitlines()
+    x0, y0, w, h, dx, dy, ang = (float(s) for s in lines[:7])
+    rows = [ln.split() for ln in lines[8:]]
+    a = np.array([(float(r[0]), float(r[1])) for r in rows if len(r) >= 2]).reshape(-1, 2)
+    idx = a[:, 0].astype(np.int64)
+    nc = int(round(w / dx))
+    u, v = (idx % nc + 0.5) * dx, (idx // nc + 0.5) * dy
+    th = math.radians(-ang)
+    e = x0 + u * math.cos(th) - v * math.sin(th)
+    n = y0 + u * math.sin(th) + v * math.cos(th)
+    return np.column_stack([n, e, a[:, 1]])
+
+
+def write_xyz(path, points, decimals=2):
+    """Space-delimited `E N Z` file (CRLF, as TBC and HYPACK write them) from points given as (north, east, z)."""
+    P = np.asarray(points, float)
+    with open(path, "w", encoding="ascii", newline="\r\n") as out:
+        for n, e, z in P:
+            out.write(f"{e:.{decimals}f} {n:.{decimals}f} {z:.{decimals}f}\n")
 
 
 # ---------------------------------------------------------------- point clouds
