@@ -320,11 +320,12 @@ def _plan_page(pdf, Pb, Fb, Pt, Ft, boundary, corridor, ortho_loader, ortho_date
         ax.plot(e - ce, n - cn, "+", color=fg, ms=7)
         ax.annotate(fmt_sta(s, 1), (e - ce, n - cn), xytext=(8, 4), textcoords="offset points",
                     fontsize=7, color=fg, weight="bold")
-    if s_sec is not None:
-        n, e = corridor.alignment.point(s_sec, np.array([-half_width, half_width]))
+    secs = [] if s_sec is None else (list(s_sec) if np.ndim(s_sec) else [s_sec])
+    for i, st in enumerate(secs):                       # section lines A-A, B-B, ...
+        n, e = corridor.alignment.point(st, np.array([-half_width, half_width]))
         ax.plot(e - ce, n - cn, "-", color=fg, lw=1.5)
         for k in (0, 1):
-            ax.text(e[k] - ce, n[k] - cn, "A", color="white", weight="bold", fontsize=10,
+            ax.text(e[k] - ce, n[k] - cn, chr(65 + i), color="white", weight="bold", fontsize=10,
                     ha="center", va="center",
                     bbox=dict(boxstyle="circle,pad=0.2", fc="black", ec="white", lw=0.8))
 
@@ -385,7 +386,7 @@ def _draw_design(ax, design, s, corridor, zs):
 
 
 def _section_page(pdf, s, Pb, Fb, Pt, Ft, boundary, corridor, base_spec, resolve_report,
-                  field=None, base_dir=None, design=None, base_label="trench bottom", half_width=4.5):
+                  field=None, base_dir=None, design=None, base_label="trench bottom", half_width=4.5, label="A"):
     import matplotlib.pyplot as plt
 
     offs = np.linspace(-half_width, half_width, 901)
@@ -427,7 +428,7 @@ def _section_page(pdf, s, Pb, Fb, Pt, Ft, boundary, corridor, base_spec, resolve
     ax.grid(alpha=0.3)
     ax.set_xlabel("Offset from CL (m), looking up-station")
     ax.set_ylabel("Elevation (m)")
-    ax.set_title(f"Section A-A at {fmt_sta(s, 1)}   (true scale)", fontsize=10)
+    ax.set_title(f"Section {label}-{label} at {fmt_sta(s, 1)}   (true scale)", fontsize=10)
     fig.canvas.draw()
     pos = ax.get_position()
     ax.set_position([pos.x0, 0.62 - pos.height / 2, pos.width, pos.height])
@@ -595,17 +596,22 @@ def build_report(job, rep, corridor, out_dir, field=None, ortho_loader=None, sur
         plt.close(fig)
 
         # Page 2: plan of fill depth
-        if rep.get("section_station") is not None:          # job file override, e.g. away from a structure edge
-            s_sec = float(rep["section_station"])
+        # job file override (a station or a list, one section page each), e.g. away from a structure edge
+        sec_cfg = rep.get("section_station")
+        if sec_cfg is None:
+            secs = [section_station(Pb, Fb, Pt, Ft, boundary, s_min, s_max, corridor, half_width=half_w)]
         else:
-            s_sec = section_station(Pb, Fb, Pt, Ft, boundary, s_min, s_max, corridor, half_width=half_w)
+            secs = [float(x) for x in (sec_cfg if isinstance(sec_cfg, (list, tuple)) else [sec_cfg])]
+            if not secs or len(secs) > 26:
+                raise ValueError(f"{name}: section_station needs 1-26 stations")
         _plan_page(pdf, Pb, Fb, Pt, Ft, boundary, corridor, ortho_loader,
-                   ortho_date=ortho_date, s_sec=s_sec, plan_step=plan_step, half_width=half_w)
+                   ortho_date=ortho_date, s_sec=secs, plan_step=plan_step, half_width=half_w)
 
-        # Page 3: cross-section A-A
-        _section_page(pdf, s_sec, Pb, Fb, Pt, Ft, boundary, corridor, rep.get("base", "self"),
-                      _resolve, field=field, base_dir=base_dir, design=job.get("design"),
-                      base_label=base_label, half_width=half_w)
+        # Page 3+: cross-sections A-A, B-B, ...
+        for i, st in enumerate(secs):
+            _section_page(pdf, st, Pb, Fb, Pt, Ft, boundary, corridor, rep.get("base", "self"),
+                          _resolve, field=field, base_dir=base_dir, design=job.get("design"),
+                          base_label=base_label, half_width=half_w, label=chr(65 + i))
 
     logo_path = _resolve_path(job.get("logo"), base_dir)
     add_header_footer(out, logo_path=logo_path, project=job.get("project", ""))
@@ -614,7 +620,8 @@ def build_report(job, rep, corridor, out_dir, field=None, ortho_loader=None, sur
         "name": name,
         "pdf": out,
         "stations": (s_min, s_max),
-        "section_station": float(s_sec),
+        "section_station": float(secs[0]),
+        "section_stations": [float(x) for x in secs],
         "fill": float(r.fill),
         "cut": float(r.cut),
         "area_compared": float(r.area_compared),

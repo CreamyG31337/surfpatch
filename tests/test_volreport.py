@@ -269,6 +269,14 @@ def test_section_station_override(tmp_path):
     assert res["section_station"] == 12.5 != auto
     assert "Section A-A at 0+012.5" in pymupdf.open(res["pdf"])[2].get_text()
 
+    rep["section_station"] = [12.5, 25.0]              # list: one section page each, A-A then B-B
+    res = volreport.run(job, names=["26-301 LIFT2"], out_dir=tmp_path / "c")[0]
+    assert res["section_stations"] == [12.5, 25.0] and res["section_station"] == 12.5
+    doc = pymupdf.open(res["pdf"])
+    assert len(doc) == 4
+    assert "Section A-A at 0+012.5" in doc[2].get_text() and "Section B-B at 0+025.0" in doc[3].get_text()
+    assert "Page 4 of 4" in doc[3].get_text()
+
 
 def test_existing_pdfs_kept_unless_overwrite(tmp_path):
     job_path = _build_synthetic_job(tmp_path, logo_value="")
