@@ -595,7 +595,10 @@ def build_report(job, rep, corridor, out_dir, field=None, ortho_loader=None, sur
         plt.close(fig)
 
         # Page 2: plan of fill depth
-        s_sec = section_station(Pb, Fb, Pt, Ft, boundary, s_min, s_max, corridor, half_width=half_w)
+        if rep.get("section_station") is not None:          # job file override, e.g. away from a structure edge
+            s_sec = float(rep["section_station"])
+        else:
+            s_sec = section_station(Pb, Fb, Pt, Ft, boundary, s_min, s_max, corridor, half_width=half_w)
         _plan_page(pdf, Pb, Fb, Pt, Ft, boundary, corridor, ortho_loader,
                    ortho_date=ortho_date, s_sec=s_sec, plan_step=plan_step, half_width=half_w)
 

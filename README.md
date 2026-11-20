@@ -151,6 +151,8 @@ Relative paths resolve against the JSON file's directory. Example (synthetic loc
 - `kind = "depression"`: constrained TIN of `bottom_csv` with rings from `boundary_dxf` vs `top_csv` + rim ring (or lid of the rim ring alone when `top_csv` is omitted).
 - `kind = "surf2surf"`: plain Delaunay TINs from `bottom_specs`/`top_specs` (or `bottom_csv`/`top_csv` or `bottom_xml`/`top_xml`), clipped to `boundary_dxf` or the overlap of both convex hulls inside `stations`.
 - `base`: `"self"`, or a preference-ordered list of `{"report": name}`, `{"depression": stem}`, `{"field": [day, code]}`, or `{"xml": path}`.
+- `section_station` (optional): station of section A-A. By default it's the top-surface shot line nearest
+  mid-report that is nearly all fill. Set it when that lands on the edge of a structure.
 - `deduction`: `count * area_m2 * slope_length` over `stations` along the corridor profile; optional `"format"` string customises the stamp text (`{label}`, `{count}`, `{area_m2}`, `{slope}`, `{volume}`).
 
 Checked on real data: `cut` on a 14,000-point original-ground surface, using three CSVs of wrongly included

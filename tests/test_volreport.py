@@ -260,6 +260,16 @@ def test_end_to_end_with_svg_logo_and_cli(tmp_path, capsys):
         doc.close()
 
 
+def test_section_station_override(tmp_path):
+    job = volreport.load_job(_build_synthetic_job(tmp_path, logo_value=""))
+    auto = volreport.run(job, names=["26-301 LIFT2"], out_dir=tmp_path / "a")[0]["section_station"]
+    rep = next(r for r in job["reports"] if r["name"] == "26-301 LIFT2")
+    rep["section_station"] = 12.5
+    res = volreport.run(job, names=["26-301 LIFT2"], out_dir=tmp_path / "b")[0]
+    assert res["section_station"] == 12.5 != auto
+    assert "Section A-A at 0+012.5" in pymupdf.open(res["pdf"])[2].get_text()
+
+
 def test_existing_pdfs_kept_unless_overwrite(tmp_path):
     job_path = _build_synthetic_job(tmp_path, logo_value="")
     out_dir = tmp_path / "sent"
