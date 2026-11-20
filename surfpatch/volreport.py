@@ -438,6 +438,38 @@ def _section_page(pdf, s, Pb, Fb, Pt, Ft, boundary, corridor, base_spec, resolve
     plt.close(fig)
 
 
+def svg_inline_css(svg):
+    """Copy simple `<style>` class rules (`.cls{fill:#00376a}`) onto the elements as `style="..."`.
+
+    MuPDF ignores SVG `<style>` blocks, so a logo coloured through CSS classes (as Illustrator exports them) came
+    out black. Only plain class selectors are handled, which is what logo exports use.
+    """
+    import re
+    css = "".join(re.findall(r"<style[^>]*>(.*?)</style>", svg, re.S))
+    rules = {}
+    for sels, body in re.findall(r"([^{}]+)\{([^}]*)\}", css):
+        for sel in sels.split(","):
+            sel = sel.strip()
+            if sel.startswith(".") and re.fullmatch(r"\.[\w-]+", sel):
+                rules[sel[1:]] = (rules.get(sel[1:], "") + ";" + body.strip()).strip(";")
+    if not rules:
+        return svg
+
+    def _sub(m):
+        style = ";".join(rules[c] for c in m.group(1).split() if c in rules)
+        return f'style="{style}"' if style else m.group(0)
+
+    return re.sub(r'class="([^"]+)"', _sub, svg)
+
+
+def _open_logo_doc(path):
+    import pymupdf
+    if str(path).lower().endswith(".svg"):
+        with open(path, encoding="utf-8") as fh:
+            return pymupdf.open("svg", svg_inline_css(fh.read()).encode("utf-8"))
+    return pymupdf.open(str(path))
+
+
 def add_header_footer(path, logo_path=None, project="", now=None):
     """Stamp vector logo top right and footer (path, timestamp, user, project, page i of N) on every page."""
     import pymupdf
@@ -447,7 +479,7 @@ def add_header_footer(path, logo_path=None, project="", now=None):
     logo = None
     try:
         if logo_path and os.path.isfile(logo_path):
-            raw = pymupdf.open(str(logo_path))
+            raw = _open_logo_doc(logo_path)
             logo = raw if raw.is_pdf else pymupdf.open("pdf", raw.convert_to_pdf())
             if logo is not raw:
                 raw.close()

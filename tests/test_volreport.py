@@ -260,6 +260,20 @@ def test_end_to_end_with_svg_logo_and_cli(tmp_path, capsys):
         doc.close()
 
 
+def test_svg_logo_css_colours_kept(tmp_path):
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="150" height="30"><defs><style>'
+           '.a{fill:#00376a;}.b{fill:#fdbd00;}</style></defs>'
+           '<rect class="a" width="100" height="30"/><rect class="b" x="100" width="50" height="30"/></svg>')
+    assert 'style="fill:#00376a"' in volreport.svg_inline_css(svg)
+    (tmp_path / "logo.svg").write_text(svg, encoding="utf-8")
+    pdf = tmp_path / "p.pdf"
+    doc = pymupdf.open(); doc.new_page(width=612, height=792); doc.save(str(pdf)); doc.close()
+    volreport.add_header_footer(str(pdf), logo_path=str(tmp_path / "logo.svg"))
+    pix = pymupdf.open(str(pdf))[0].get_pixmap(dpi=72, clip=pymupdf.Rect(612 - 186, 24, 612 - 36, 54))
+    cols = {tuple(pix.pixel(x, pix.height // 2)) for x in range(0, pix.width, 5)}
+    assert (0, 55, 106) in cols and (253, 189, 0) in cols      # navy and yellow, not black
+
+
 def test_section_station_override(tmp_path):
     job = volreport.load_job(_build_synthetic_job(tmp_path, logo_value=""))
     auto = volreport.run(job, names=["26-301 LIFT2"], out_dir=tmp_path / "a")[0]["section_station"]
