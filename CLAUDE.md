@@ -37,6 +37,14 @@ See README.md.
 - `surfpatch/labels.py` (2026-11-16): `place_labels`, overlap-free point labels in one greedy pass (8 positions
   beside the point, then rings on leaders, else dropped; priority = input order). EXPERIMENTAL: cfmap uses it only with config `"label_place": true`; the default is the
   original fixed-offset labels (user preferred their regular look on evenly spaced scans).
+- `surfpatch/maputil.py` (2026-11-27): `north_arrow`, `coord_grid`, `scale_bar` plan-view furniture (volreport uses them).
+- `surfpatch/pipes.py` (2026-11-27): `Pipe` (+ `from_segments` for analytical line/curve runs), `sweep_pipe` (miter rings
+  stretched 1/cos(half bend) at vertices), `offset_segments` (concentric rail arcs), `min_pipe_clearance` (exact
+  segment-segment, KD pruned), `pipes_to_dxf` (R12, polyface split under 32767), `pipes_to_landxml`.
+- `surfpatch/pdfmarkup.py` (2026-11-27): `fit_affine` (residuals + redundancy/scale/skew), footprints (vectorised
+  coverage union), `draw_layer_on_page`, `draw_legend`, `overlay_boundaries` (OCG layers; `xy_space` for rotated sheets).
+- `surfpatch/lazcheck.py` (2026-11-27): `check_laz_bias` (robust local plane per control point, LAS class filter,
+  collinear-control tilt) and `check_laz_pair` (flight vs flight lowest-per-cell). CLI `lazcheck`.
 - `tests/test_surfpatch.py`, `tests/test_drone.py`, `tests/test_cfmap.py`, `tests/test_isopach.py`,
   `tests/test_tinbuild.py`, `tests/test_fielddata.py`, `tests/test_volreport.py`: synthetic data only.
   The CloudCompare tests skip when it isn't installed.

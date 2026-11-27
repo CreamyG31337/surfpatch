@@ -17,7 +17,7 @@ from scipy.spatial import Delaunay
 from rxlkit.landxml import read_surface
 from rxlkit.roadxml import Corridor
 
-from . import compare, fielddata, io, isopach, tinbuild
+from . import compare, fielddata, io, isopach, maputil, tinbuild
 
 
 def fmt_sta(s, dec=1):
@@ -307,9 +307,7 @@ def _draw_locator(fig, rect, boundary, corridor, ortho_loader, step=50.0):
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
-    x0, y0 = ax.get_xlim()[1] - 6, ax.get_ylim()[1] - 4
-    ax.annotate("N", (x0, y0), xytext=(x0, y0 - 12), ha="center", color=fg, weight="bold",
-                arrowprops=dict(arrowstyle="->", color=fg))
+    maputil.north_arrow(ax, size_in=0.55, corner="upper right", label="")
 
 
 def _plan_page(pdf, Pb, Fb, Pt, Ft, boundary, corridor, ortho_loader, ortho_date=None,
@@ -358,10 +356,8 @@ def _plan_page(pdf, Pb, Fb, Pt, Ft, boundary, corridor, ortho_loader, ortho_date
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.plot([-half + 1, -half + 6], [-half + 1, -half + 1], "-", color=fg, lw=2)
-    ax.text(-half + 3.5, -half + 1.4, "5 m", color=fg, ha="center", fontsize=7)
-    ax.annotate("N", (half - 1.5, half - 1), xytext=(half - 1.5, half - 4), ha="center",
-                color=fg, weight="bold", arrowprops=dict(arrowstyle="->", color=fg))
+    maputil.scale_bar(ax, corner="lower left")          # nice length (~1/5 of the view), not a fixed 5 m
+    maputil.north_arrow(ax, size_in=0.6, corner="upper right", label="")
     cax = fig.add_axes([0.25, 0.14, 0.5, 0.015])
     fig.colorbar(tc, cax=cax, orientation="horizontal", label="Fill depth (m)")
     if ortho_date:
