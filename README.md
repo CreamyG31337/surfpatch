@@ -24,6 +24,7 @@ python -m surfpatch mtx-to-xyz GRID.MTX [OUT.xyz]                               
 python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
 python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]        3-page TIN-to-TIN volume report PDFs
                                                     (existing PDFs are kept unless --overwrite)
+python -m surfpatch lazcheck FLIGHT.laz --control CTRL.csv [--radius 0.5]         vertical bias & planar tilt check vs control
 ```
 
 - `cut --csv` removes the vertices that match a shot within 6 mm in 3D (`--tol`). The faces that used them are
@@ -193,11 +194,15 @@ r.points, r.faces, r.stats                                      # patch TIN + ar
 `mesh.PatchError` is raised instead of returning a bad TIN.
 
 ```python
-from surfpatch import cc, cfmap, tinbuild, fielddata, volreport
+from surfpatch import cc, cfmap, tinbuild, fielddata, volreport, maputil, pipes, pdfmarkup, lazcheck
 d = cc.c2m(points_enz, V_enz, F)                        # signed cloud-to-mesh via CloudCompare -SILENT (+ = normal side)
 r = cfmap.run("site_cfmap.json", ["scan.csv"], "out")   # same as the cfmap command; returns paths + stats
 bot, lid = tinbuild.depression(P_bot, [rim, bring], rim)
 res = volreport.run("job.json", out_dir="out")          # 3-page volume report PDFs; returns per-report metrics
+maputil.north_arrow(ax); maputil.coord_grid(ax); maputil.scale_bar(ax)
+pipes.pipes_to_dxf("pipes.dxf", [pipes.Pipe("PF1", cl_nez, 0.103)])
+pdfmarkup.overlay_boundaries("plan.pdf", "marked.pdf", pages_georef, layers)
+chk = lazcheck.check_laz_bias("flight.laz", "control.csv")
 ```
 
 `cc` finds CloudCompare from `$CLOUDCOMPARE_EXE` or `C:\Projects\cloudcompare\CloudCompare_*_bin_x64`. It shifts

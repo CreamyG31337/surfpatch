@@ -14,6 +14,7 @@
   mtx-to-xyz MTX [OUT]                     HYPACK sparse matrix (.MTX) bathymetry -> E N Z .xyz
   cfmap    CONFIG SCAN... --out DIR        cut/fill map sheets of scanned walls vs a design corridor (.rxl)
   volreport JOB.json [NAME...] [--out DIR] TIN-to-TIN volume report PDFs (summary, plan, cross-section)
+  lazcheck LAZ --control CSV               check drone/LiDAR LAZ vertical bias & planar tilt vs control
 
 CSV arguments accept wildcards. Surfaces are read/written with rxlkit.landxml; every written TIN passes
 rxlkit.tin.quality_ok and an area check.
@@ -389,6 +390,26 @@ def main(argv=None):
     sp.add_argument("names", nargs="*", help="report names to build (default: all in job)")
     sp.add_argument("--out", help="output folder (overrides out_dir in job JSON)")
     sp.add_argument("--overwrite", action="store_true", help="replace report PDFs that already exist")
+
+    def cmd_lazcheck(args):
+        from . import lazcheck
+        res = lazcheck.check_laz_bias(
+            args.laz, args.control, radius=args.radius, min_points=args.min_points,
+            max_bias=args.max_bias, max_tilt_per_100m=args.max_tilt, order=args.order,
+        )
+        print(lazcheck.format_bias_report(res))
+        if res["status"] != "OK":
+            sys.exit(2)
+
+    sp = sub.add_parser("lazcheck", help="check LAS/LAZ vertical bias and tilt against survey control")
+    sp.set_defaults(fn=cmd_lazcheck)
+    sp.add_argument("laz", help="LAS or LAZ point cloud")
+    sp.add_argument("--control", required=True, help="control/check-point CSV (P,N,E,Z[,D])")
+    sp.add_argument("--radius", type=float, default=0.5, help="search radius around each point (m)")
+    sp.add_argument("--min-points", type=int, default=5, help="min cloud points inside radius")
+    sp.add_argument("--max-bias", type=float, default=0.05, help="warning threshold for |median dz| (m)")
+    sp.add_argument("--max-tilt", type=float, default=0.05, help="warning threshold for tilt (m per 100 m)")
+    sp.add_argument("--order", default="PNEZD", help="column order for headerless control CSV")
 
     a = ap.parse_args(argv)
     try:
