@@ -1,0 +1,39 @@
+[project]
+name = "surfpatch"
+version = "0.1.0"
+description = "Check and repair LandXML TIN surfaces built from survey data"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "rxlkit",          # sibling repo ../rxlkit (LandXML read/write, TIN checks)
+    "numpy>=1.24",
+    "scipy",
+    "shapely",
+    "triangle",
+    "matplotlib",
+    "ezdxf",
+    "pillow",
+    "pymupdf",
+]
+license = { text = "MIT" }
+authors = [{ name = "Lance Colton" }]
+
+[project.optional-dependencies]
+las = ["laspy[lazrs]"]
+dev = ["pytest"]
+
+[project.scripts]
+surfpatch = "surfpatch.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["surfpatch"]
+
+[tool.uv.sources]
+rxlkit = { path = "../rxlkit", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

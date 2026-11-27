@@ -1,0 +1,17 @@
+# one-off scripts with site specifics, and local notes
+legacy/
+CLAUDE.local.md
+.claude/settings.local.json
+# data and outputs
+*.npz
+*.png
+*.laz
+*.las
+out/
+data/
+# python
+__pycache__/
+.venv/
+*.egg-info/
+# generated knowledge graph
+graphify-out/
