@@ -84,6 +84,37 @@ def test_deduction_slope_length_on_sloped_profile(tmp_path):
     assert text == "LESS PIPE (6 x 0.01 x 50.0 m) = 3.00 m3"
 
 
+def test_base_profile_equal_to_bottom_does_not_cut_corners(tmp_path):
+    """A base that equals the bottom except for sub-mm rounding must draw on the bottom, not bridge the V."""
+    N0, E0 = 1000.0, 2000.0
+    rxl = tmp_path / "straight.rxl"
+    rxl.write_text(build_rxl({
+        "name": "STRAIGHT",
+        "horizontal": {"pis": [{"north": N0, "east": E0}, {"north": N0 + 10.0, "east": E0}]},
+        "vertical": {"vpis": [{"station": 0.0, "elevation": 10.0}, {"station": 10.0, "elevation": 10.0}]},
+    }), encoding="utf-8")
+    cor = Corridor.load(rxl)
+
+    def v_surface(dz_mid):
+        # V across the line: z = 10 + |offset|, low point on the line; offset + is east (right, looking north)
+        P, F = [], []
+        for n in (N0, N0 + 10.0):
+            for o in (-2.0, 0.0, 2.0):
+                P.append((n, E0 + o, 10.0 + abs(o) + (dz_mid if o == 0.0 else 0.0)))
+        F = [(0, 1, 4), (0, 4, 3), (1, 2, 5), (1, 5, 4)]
+        return np.array(P), np.array(F)
+
+    offs = np.linspace(-2.0, 2.0, 401)
+    Pb, Fb = v_surface(0.0)
+    zb = volreport._sample_section(volreport.compare.Sampler(Pb, Fb), 5.0, offs, cor)
+    base = v_surface(0.0003)
+    z = volreport.base_profile([{"report": "R"}], 5.0, offs, zb, cor, lambda name: base)
+    assert np.nanmax(np.abs(z - zb)) < 0.001            # old behaviour bridged the V: 2 m too high at the low point
+    # a base really above the bottom (> tol) is still dropped and bridged to the bottom's ends
+    z2 = volreport.base_profile([{"report": "R"}], 5.0, offs, zb, cor, lambda name: v_surface(0.5))
+    assert z2[200] == pytest.approx(zb[0], abs=1e-9)    # straight line between the two (equal) ends
+
+
 def _build_synthetic_job(tmp_path, logo_value):
     N0, E0 = 1000.0, 2000.0
     rxl = tmp_path / "trench.rxl"
