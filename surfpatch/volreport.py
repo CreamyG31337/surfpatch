@@ -201,8 +201,13 @@ def section_station(Pb, Fb, Pt, Ft, boundary, s0, s1, corridor, half_width=4.5):
     return min(pick, key=lambda st: abs(st - mid))
 
 
-def base_profile(base_spec, s, offs, zb, corridor, resolve_report, field=None, base_dir=None, search_stations=8.0):
-    """Base-line elevations along the section at `s`, joined to the ends of `zb` (NaN outside `zb`)."""
+def base_profile(base_spec, s, offs, zb, corridor, resolve_report, field=None, base_dir=None, search_stations=8.0,
+                 tol=0.001):
+    """Base-line elevations along the section at `s`, joined to the ends of `zb` (NaN outside `zb`).
+
+    Base points more than `tol` above the bottom are dropped and bridged with straight lines; within `tol` they
+    are kept, so a base that equals the bottom (e.g. a composite bottom built from it) draws on top of it instead
+    of cutting corners where rounding left it a fraction of a millimetre higher."""
     if not base_spec or base_spec == "self":
         return zb.copy()
     z = np.full_like(zb, np.nan)
@@ -240,7 +245,8 @@ def base_profile(base_spec, s, offs, zb, corridor, resolve_report, field=None, b
     have = np.isfinite(zb)
     if not have.any():
         return z
-    z[have & (z > zb)] = np.nan
+    z[have & (z > zb + tol)] = np.nan
+    z = np.where(have & (z > zb), zb, z)
     i0, i1 = np.flatnonzero(have)[[0, -1]]
     z[:i0] = np.nan
     z[i1 + 1:] = np.nan
