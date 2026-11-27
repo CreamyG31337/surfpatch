@@ -41,6 +41,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
+from rxlkit.stations import fmt_sta  # station text; cli imports it from here
 
 from .labels import place_labels, text_size
 
@@ -78,9 +79,6 @@ def read_tcf(path, keep_top=False):
     return [v[0] for v in vals[1:-1]], [v[1] for v in vals[:-1]]
 
 
-def fmt_sta(s, dec=2):
-    a = abs(s)
-    return f"{'-' if s < 0 else ''}{int(a // 1000)}+{a % 1000:0{4 + dec}.{dec}f}"
 
 
 def cf_label(v):

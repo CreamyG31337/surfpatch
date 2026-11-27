@@ -16,19 +16,14 @@ from scipy.spatial import Delaunay
 
 from rxlkit.landxml import read_surface
 from rxlkit.roadxml import Corridor
+from rxlkit.stations import fmt_sta as _fmt_sta
 
 from . import compare, fielddata, io, isopach, maputil, tinbuild
 
 
 def fmt_sta(s, dec=1):
-    """Format station as '0+191.0' (dec=1) or '0+050' (dec=0)."""
-    a = abs(float(s))
-    sign = "-" if s < 0 else ""
-    km = int(a // 1000)
-    rem = a % 1000
-    if dec <= 0:
-        return f"{sign}{km}+{rem:03.0f}"
-    return f"{sign}{km}+{rem:0{4 + dec}.{dec}f}"
+    """Format station as '0+191.0' (dec=1) or '0+050' (dec=0); see rxlkit.stations.fmt_sta."""
+    return _fmt_sta(s, dec)
 
 
 def _resolve_path(val, base_dir, required=None):
