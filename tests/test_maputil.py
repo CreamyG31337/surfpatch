@@ -20,6 +20,13 @@ def test_map_furniture_renders_cleanly(tmp_path):
     sb_len = scale_bar(ax, corner="lower left")
     assert sb_len > 0
 
+    fig2, ax2 = plt.subplots()
+    ax2.set_xlim(2000.0, 2001.0)
+    ax2.set_ylim(1000.0, 1001.0)
+    assert coord_grid(ax2, step=0.25) == 0.25
+    assert [t.get_text() for t in ax2.get_xticklabels()][:2] == ["2000.00", "2000.25"]
+    plt.close(fig2)
+
     out = tmp_path / "plan.pdf"
     fig.savefig(out)
     plt.close(fig)

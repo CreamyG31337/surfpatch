@@ -14,7 +14,7 @@
   mtx-to-xyz MTX [OUT]                     HYPACK sparse matrix (.MTX) bathymetry -> E N Z .xyz
   cfmap    CONFIG SCAN... --out DIR        cut/fill map sheets of scanned walls vs a design corridor (.rxl)
   volreport JOB.json [NAME...] [--out DIR] TIN-to-TIN volume report PDFs (summary, plan, cross-section)
-  lazcheck LAZ --control CSV               check drone/LiDAR LAZ vertical bias & planar tilt vs control
+  lazcheck LAZ --control CSV | --against LAZ2   drone/LiDAR vertical bias & tilt vs control or an earlier flight
 
 CSV arguments accept wildcards. Surfaces are read/written with rxlkit.landxml; every written TIN passes
 rxlkit.tin.quality_ok and an area check.
@@ -393,18 +393,33 @@ def main(argv=None):
 
     def cmd_lazcheck(args):
         from . import lazcheck
-        res = lazcheck.check_laz_bias(
-            args.laz, args.control, radius=args.radius, min_points=args.min_points,
-            max_bias=args.max_bias, max_tilt_per_100m=args.max_tilt, order=args.order,
-        )
-        print(lazcheck.format_bias_report(res))
+        if (args.control is None) == (args.against is None):
+            sys.exit("lazcheck: give exactly one of --control CSV or --against OTHER.laz")
+        classes = [int(c) for c in args.classes.split(",")] if args.classes else None
+        if args.control:
+            res = lazcheck.check_laz_bias(
+                args.laz, args.control, radius=args.radius, min_points=args.min_points,
+                max_bias=args.max_bias, max_tilt_per_100m=args.max_tilt, order=args.order,
+                classes=classes, stat=args.stat,
+            )
+            print(lazcheck.format_bias_report(res))
+        else:
+            res = lazcheck.check_laz_pair(args.laz, args.against, cell=args.cell, max_bias=args.max_bias,
+                                          max_tilt_per_100m=args.max_tilt, classes=classes)
+            print(lazcheck.format_pair_report(res))
         if res["status"] != "OK":
             sys.exit(2)
 
-    sp = sub.add_parser("lazcheck", help="check LAS/LAZ vertical bias and tilt against survey control")
+    sp = sub.add_parser("lazcheck", help="check LAS/LAZ vertical bias and tilt against control or another flight")
     sp.set_defaults(fn=cmd_lazcheck)
     sp.add_argument("laz", help="LAS or LAZ point cloud")
-    sp.add_argument("--control", required=True, help="control/check-point CSV (P,N,E,Z[,D])")
+    sp.add_argument("--control", help="control/check-point CSV (P,N,E,Z[,D])")
+    sp.add_argument("--against", help="earlier flight LAS/LAZ: grid both (lowest point per cell) and difference")
+    sp.add_argument("--cell", type=float, default=1.0, help="grid cell for --against (m)")
+    sp.add_argument("--classes", help="keep only these LAS classes, e.g. 2 (ground) or 2,8")
+    sp.add_argument("--stat", choices=("plane", "median", "low"), default="plane",
+                    help="cloud elevation at each control point: robust local plane (default), robust median, "
+                         "or 5th percentile (vegetated, unclassified)")
     sp.add_argument("--radius", type=float, default=0.5, help="search radius around each point (m)")
     sp.add_argument("--min-points", type=int, default=5, help="min cloud points inside radius")
     sp.add_argument("--max-bias", type=float, default=0.05, help="warning threshold for |median dz| (m)")

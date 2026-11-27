@@ -24,7 +24,10 @@ python -m surfpatch mtx-to-xyz GRID.MTX [OUT.xyz]                               
 python -m surfpatch cfmap    CONFIG.json SCAN.csv|.laz [...] --out DIR [--name STEM] [--engine section]
 python -m surfpatch volreport JOB.json [NAME...] [--out DIR] [--overwrite]        3-page TIN-to-TIN volume report PDFs
                                                     (existing PDFs are kept unless --overwrite)
-python -m surfpatch lazcheck FLIGHT.laz --control CTRL.csv [--radius 0.5]         vertical bias & planar tilt check vs control
+python -m surfpatch lazcheck FLIGHT.laz --control CTRL.csv [--radius 0.5] [--classes 2] [--stat plane|median|low]
+                                                    vertical bias & planar tilt vs control (robust local plane per point)
+python -m surfpatch lazcheck NEW.laz --against OLD.laz [--cell 1]                 flight vs flight: lowest-per-cell difference,
+                                                    tilt plane (real change dropped) and 100 m block medians
 ```
 
 - `cut --csv` removes the vertices that match a shot within 6 mm in 3D (`--tol`). The faces that used them are
@@ -200,9 +203,12 @@ r = cfmap.run("site_cfmap.json", ["scan.csv"], "out")   # same as the cfmap comm
 bot, lid = tinbuild.depression(P_bot, [rim, bring], rim)
 res = volreport.run("job.json", out_dir="out")          # 3-page volume report PDFs; returns per-report metrics
 maputil.north_arrow(ax); maputil.coord_grid(ax); maputil.scale_bar(ax)
-pipes.pipes_to_dxf("pipes.dxf", [pipes.Pipe("PF1", cl_nez, 0.103)])
-pdfmarkup.overlay_boundaries("plan.pdf", "marked.pdf", pages_georef, layers)
-chk = lazcheck.check_laz_bias("flight.laz", "control.csv")
+pipes.pipes_to_dxf("pipes.dxf", [pipes.Pipe("PF1", cl_nez, 0.103)])      # miter-correct rings at bends
+p = pipes.Pipe.from_segments("PF1", line_curve_segs, 0.103)             # true arcs: rails written as <Curve>
+pipes.pipes_to_landxml("pipes.xml", [p]); pipes.min_pipe_clearance([p, q])   # exact segment-segment gap
+pdfmarkup.overlay_boundaries("plan.pdf", "marked.pdf", pages_georef, layers)  # + "legend_rect" per page
+chk = lazcheck.check_laz_bias("flight.laz", "control.csv", classes=(2,))
+pair = lazcheck.check_laz_pair("nov.laz", "oct.laz", cell=1.0)
 ```
 
 `cc` finds CloudCompare from `$CLOUDCOMPARE_EXE` or `C:\Projects\cloudcompare\CloudCompare_*_bin_x64`. It shifts

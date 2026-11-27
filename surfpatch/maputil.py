@@ -71,7 +71,7 @@ def coord_grid(ax, step=None, color="#64748b", alpha=0.35, lw=0.5, fontsize=7,
 
     xt = np.arange(math.ceil(x0 / step) * step, x1 + 1e-9, step)
     yt = np.arange(math.ceil(y0 / step) * step, y1 + 1e-9, step)
-    dec = 0 if abs(step - round(step)) < 1e-9 else 1
+    dec = len(f"{step:.6f}".rstrip("0").split(".")[1])     # 10 -> 0, 2.5 -> 1, 0.25 -> 2
     fmt = f"{{:.{dec}f}}"
 
     ax.xaxis.set_major_locator(FixedLocator(xt))

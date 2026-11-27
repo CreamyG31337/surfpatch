@@ -18,13 +18,19 @@ def fit_affine(en, xy):
 
     Returns ``(cx, cy, residuals)`` where ``cx`` and ``cy`` are length-3 arrays
     (``x = cx[0]*E + cx[1]*N + cx[2]``) and ``residuals`` is a dict with ``max_m``, ``rms_m``,
-    and ``per_point_m`` ground residuals obtained by inverting the fitted transform.
+    ``per_point_m`` (ground residuals via the inverse transform), ``n_points``, ``redundant`` (False with
+    exactly 3 points: the fit is exact and the residuals prove nothing; use 4+ grid crosses),
+    ``scale_pt_per_m`` (x, y) and ``skew_deg`` (non-orthogonality; a few tenths at most for a true plan sheet).
     """
     en = np.asarray(en, dtype=float)
     xy = np.asarray(xy, dtype=float)
     if en.ndim != 2 or en.shape[1] != 2 or xy.shape != en.shape or len(en) < 3:
         raise ValueError("need at least 3 matching (E, N) and (pdf_x, pdf_y) pairs")
-    A = np.c_[en[:, 0], en[:, 1], np.ones(len(en))]
+    A = np.c_[en[:, 0] - en[:, 0].mean(), en[:, 1] - en[:, 1].mean(), np.ones(len(en))]
+    if np.linalg.matrix_rank(A, tol=1e-6 * max(1.0, float(np.abs(A[:, :2]).max()))) < 3:
+        raise ValueError("control points are collinear: affine fit is singular")
+    A[:, 0] += en[:, 0].mean()
+    A[:, 1] += en[:, 1].mean()
     cx, _, _, _ = np.linalg.lstsq(A, xy[:, 0], rcond=None)
     cy, _, _, _ = np.linalg.lstsq(A, xy[:, 1], rcond=None)
 
@@ -33,10 +39,16 @@ def fit_affine(en, xy):
     t = np.array([cx[2], cy[2]], dtype=float)
     en_back = np.linalg.solve(M, (xy - t).T).T
     errs = np.hypot(en_back[:, 0] - en[:, 0], en_back[:, 1] - en[:, 1])
+    ce, cn = M[:, 0], M[:, 1]  # sheet vectors of +1 m east and +1 m north
+    skew = abs(90.0 - np.degrees(np.arccos(np.clip(ce @ cn / (np.linalg.norm(ce) * np.linalg.norm(cn)), -1, 1))))
     residuals = {
         "max_m": float(np.max(errs)),
         "rms_m": float(np.sqrt(np.mean(errs * errs))),
         "per_point_m": [float(v) for v in errs],
+        "n_points": int(len(en)),
+        "redundant": bool(len(en) > 3),
+        "scale_pt_per_m": (float(np.linalg.norm(ce)), float(np.linalg.norm(cn))),
+        "skew_deg": float(skew),
     }
     return cx, cy, residuals
 
@@ -63,21 +75,32 @@ def tin_footprint(surface, max_edge=None, simplify=0.05):
     faces = np.asarray(surface.faces, dtype=int)
     if len(faces) == 0:
         return MultiPolygon()
-    tris = []
-    for a, b, c in faces:
-        p0, p1, p2 = pts_en[a], pts_en[b], pts_en[c]
-        if max_edge is not None:
-            e0 = float(np.hypot(*(p1 - p0)))
-            e1 = float(np.hypot(*(p2 - p1)))
-            e2 = float(np.hypot(*(p0 - p2)))
-            if max(e0, e1, e2) > max_edge:
-                continue
-        poly = Polygon([p0, p1, p2])
-        if poly.is_valid and poly.area > 1e-4:
-            tris.append(poly)
-    if not tris:
+    return _union_triangles(pts_en[faces], max_edge=max_edge, min_area=1e-4, simplify=simplify)
+
+
+def _union_triangles(tri_xy, max_edge=None, min_area=0.0, simplify=0.0):
+    """Union of (m, 3, 2) plan triangles, vectorised. TIN/Delaunay triangles share edges exactly, so the
+    fast coverage union is used; overlapping input falls back to a general union."""
+    import shapely
+
+    t = np.asarray(tri_xy, dtype=float)
+    keep = np.ones(len(t), bool)
+    if max_edge is not None:
+        edges = np.linalg.norm(t - np.roll(t, -1, axis=1), axis=2)
+        keep &= edges.max(axis=1) <= max_edge
+    area = 0.5 * np.abs((t[:, 1, 0] - t[:, 0, 0]) * (t[:, 2, 1] - t[:, 0, 1])
+                        - (t[:, 2, 0] - t[:, 0, 0]) * (t[:, 1, 1] - t[:, 0, 1]))
+    keep &= area > min_area
+    if not keep.any():
         return MultiPolygon()
-    geom = unary_union(tris).buffer(0.01).buffer(-0.01)
+    polys = shapely.polygons(np.concatenate([t[keep], t[keep][:, :1]], axis=1))
+    try:
+        geom = shapely.coverage_union_all(polys)
+        if not geom.is_valid:
+            raise ValueError
+    except Exception:
+        geom = unary_union(polys)
+    geom = geom.buffer(0.01).buffer(-0.01)
     if simplify and simplify > 0:
         geom = geom.simplify(simplify, preserve_topology=True)
     return geom
@@ -90,22 +113,7 @@ def points_footprint(points_en, max_edge=25.0, simplify=0.08):
     if len(en) < 3:
         return MultiPolygon()
     tri = Delaunay(en)
-    tris = []
-    for f in tri.simplices:
-        pts = en[f]
-        e0 = float(np.hypot(*(pts[1] - pts[0])))
-        e1 = float(np.hypot(*(pts[2] - pts[1])))
-        e2 = float(np.hypot(*(pts[0] - pts[2])))
-        if max(e0, e1, e2) <= max_edge:
-            poly = Polygon(pts)
-            if poly.is_valid and poly.area > 0.05:
-                tris.append(poly)
-    if not tris:
-        return MultiPolygon()
-    geom = unary_union(tris).buffer(0.01).buffer(-0.01)
-    if simplify and simplify > 0:
-        geom = geom.simplify(simplify, preserve_topology=True)
-    return geom
+    return _union_triangles(en[tri.simplices], max_edge=max_edge, min_area=0.05, simplify=simplify)
 
 
 def dxf_footprint(path, as_lines=False):
@@ -227,17 +235,80 @@ def draw_layer_on_page(page, polys_pdf, lines_pdf, *, ocg, rgb=(0.85, 0.1, 0.1),
     return count
 
 
-def overlay_boundaries(src_pdf, out_pdf, pages_georef, layers):
+def _pdf_dashes(dashes):
+    return f"[{' '.join(f'{d:g}' for d in dashes)}] 0" if dashes else None
+
+
+def draw_legend(page, rect, layers, *, ocg=None, title="BOUNDARY LAYERS", note="", columns=None,
+                row_h=15.2, fontsize=7.6):
+    """Draw a boxed legend (title bar + one swatch per layer, 1 or 2 columns) on ``page`` in ``rect``
+    ``(x0, y0, x1, y1)`` PDF points, bound to OCG ``ocg`` so it toggles like the layers.
+
+    ``layers`` are the same dicts as ``overlay_boundaries`` (``name``, ``rgb``, optional ``dashes``,
+    ``fill_opacity``, and ``legend`` text, default ``name``). ``columns`` defaults to 2 when the layers
+    don't fit one column. Returns the number of rows that did not fit (0 = all shown). Text is upright in
+    unrotated page space, so on a /Rotate 90 sheet it reads sideways.
+    """
+    x0, y0, x1, y1 = rect
+    oc = ocg if ocg is not None else 0
+    dark = (0.15, 0.15, 0.15)
+    sh = page.new_shape()
+    sh.draw_rect(pymupdf.Rect(x0, y0, x1, y1))
+    sh.finish(color=dark, fill=(1, 1, 1), fill_opacity=1.0, width=1.4, oc=oc)
+    sh.draw_rect(pymupdf.Rect(x0, y0, x1, y0 + 21))
+    sh.finish(color=dark, fill=(0.12, 0.31, 0.47), width=1.0, oc=oc)
+    sh.commit(overlay=True)
+    page.insert_text(pymupdf.Point(x0 + 8, y0 + 14.5), title, fontsize=9.2, fontname="hebo",
+                     color=(1, 1, 1), overlay=True, oc=oc)
+
+    body_h = (y1 - (12 if note else 4)) - (y0 + 35) + row_h
+    fit_rows = max(1, int(body_h // row_h))
+    n = len(layers)
+    cols = columns or (1 if n <= fit_rows else 2)
+    per_col = (n + cols - 1) // cols
+    col_w = (x1 - x0) / cols
+    dropped = 0
+    for idx, lyr in enumerate(layers):
+        col, row = divmod(idx, per_col)
+        if row >= fit_rows:
+            dropped += 1
+            continue
+        cx = x0 + 8 + col * col_w
+        cy = y0 + 35 + row * row_h
+        rgb = lyr.get("rgb", (0.85, 0.1, 0.1))
+        fo = min(0.32, lyr.get("fill_opacity", 0.0) * 2.5)
+        sw = page.new_shape()
+        sw.draw_rect(pymupdf.Rect(cx, cy - 7, cx + 22, cy + 2))
+        sw.finish(color=rgb, fill=rgb if fo > 0 else None, fill_opacity=fo if fo > 0 else 1.0, width=1.8,
+                  dashes=_pdf_dashes(lyr.get("dashes")), oc=oc)
+        sw.commit(overlay=True)
+        page.insert_text(pymupdf.Point(cx + 27, cy + 0.5), lyr.get("legend", lyr["name"]), fontsize=fontsize,
+                         fontname="helv", color=(0.1, 0.1, 0.1), overlay=True, oc=oc)
+    if note:
+        page.insert_text(pymupdf.Point(x0 + 8, y1 - 6), note, fontsize=7.0, fontname="heit",
+                         color=(0.3, 0.3, 0.3), overlay=True, oc=oc)
+    return dropped
+
+
+def overlay_boundaries(src_pdf, out_pdf, pages_georef, layers, legend_title="BOUNDARY LAYERS",
+                       legend_note="Toggle layers in the Bluebeam/Acrobat Layers panel.",
+                       legend_layer="00. Markup Legend"):
     """Overlay multiple georeferenced boundary layers onto ``src_pdf`` as toggleable Bluebeam/Acrobat
     PDF layers (OCGs) and save to ``out_pdf``.
 
     Parameters
     ----------
     pages_georef : list[dict]
-        Each entry: ``{"page": int (0-based), "en": (n, 2), "xy": (n, 2), "viewport": (x0,y0,x1,y1)|None}``.
+        Each entry: ``{"page": int (0-based), "en": (n, 2), "xy": (n, 2), "viewport": (x0,y0,x1,y1)|None}``
+        plus optional ``"legend_rect": (x0, y0, x1, y1)`` (draws ``draw_legend`` there on its own OCG) and
+        ``"xy_space"``: ``"page"`` (default: unrotated page coordinates, as ``page.get_text`` /
+        ``get_drawings`` report them) or ``"visible"`` (measured on the sheet as displayed, e.g. off a
+        rendered PNG of a page with /Rotate 90; converted with the page's derotation matrix). The viewport
+        and legend rect use the same space.
     layers : list[dict]
         Each entry: ``{"name": str, "geom_en": shapely geom, "rgb": (r,g,b), ...}`` plus optional
-        ``lw``, ``dashes``, ``fill_opacity``, ``subject``, ``comment``, ``author``, ``on`` (bool).
+        ``lw``, ``dashes``, ``fill_opacity``, ``stroke_opacity``, ``subject``, ``comment``, ``author``,
+        ``legend`` (legend text), ``on`` (bool).
 
     Returns a summary dict with ``residuals`` per page and ``annotations`` per layer.
     """
@@ -248,12 +319,32 @@ def overlay_boundaries(src_pdf, out_pdf, pages_georef, layers):
             ocg = doc.add_ocg(lyr["name"], on=lyr.get("on", True))
             ocgs.append(ocg)
 
+        def to_page(page, pts, space):
+            if space != "visible" or page.rotation == 0:
+                return np.asarray(pts, dtype=float)
+            m = page.derotation_matrix
+            return np.array([tuple(pymupdf.Point(x, y) * m) for x, y in pts], dtype=float)
+
+        def rect_to_page(page, r, space):
+            if r is None:
+                return None
+            q = to_page(page, [(r[0], r[1]), (r[2], r[3])], space)
+            return (min(q[:, 0]), min(q[:, 1]), max(q[:, 0]), max(q[:, 1]))
+
         page_fits = []
         residuals_out = {}
+        ocg_legend = None
         for pg in pages_georef:
-            cx, cy, res = fit_affine(pg["en"], pg["xy"])
-            page_fits.append((pg["page"], cx, cy, pg.get("viewport")))
+            page = doc[pg["page"]]
+            space = pg.get("xy_space", "page")
+            cx, cy, res = fit_affine(pg["en"], to_page(page, pg["xy"], space))
+            page_fits.append((pg["page"], cx, cy, rect_to_page(page, pg.get("viewport"), space)))
             residuals_out[pg["page"]] = res
+            if pg.get("legend_rect") is not None:
+                if ocg_legend is None:
+                    ocg_legend = doc.add_ocg(legend_layer, on=True)
+                draw_legend(page, rect_to_page(page, pg["legend_rect"], space), layers, ocg=ocg_legend,
+                            title=legend_title, note=legend_note)
 
         counts = {}
         for lyr, ocg in zip(layers, ocgs):
@@ -271,6 +362,7 @@ def overlay_boundaries(src_pdf, out_pdf, pages_georef, layers):
                     subject=lyr.get("subject", lyr["name"]),
                     comment=lyr.get("comment", ""),
                     author=lyr.get("author", "Survey Markup"),
+                    stroke_opacity=lyr.get("stroke_opacity", 0.92),
                 )
             counts[lyr["name"]] = total
 
